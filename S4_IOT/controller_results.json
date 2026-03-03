@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-03-03T23:19:34.260685",
+  "system": "SDN WiFi Testbed with Attack Detection",
+  "jammer_detected": false,
+  "detection_time": null,
+  "channels_monitored": [
+    2,
+    6,
+    11
+  ],
+  "current_channel": 6,
+  "detected_attackers": [],
+  "isolated_ips": [],
+  "metrics_count": 195
+}

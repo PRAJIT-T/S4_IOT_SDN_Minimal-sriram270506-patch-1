@@ -1,0 +1,427 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                                                                           ║
+║         SDN WiFi TESTBED - ATTACK DETECTION & ISOLATION SYSTEM           ║
+║                         PROJECT SUMMARY & SETUP                          ║
+║                                                                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════════════
+1. WHAT YOU HAVE NOW
+═══════════════════════════════════════════════════════════════════════════
+
+✅ TWO VIRTUAL NODES
+   - Simulated WiFi clients in your network
+   - Both connected to WiFi AP (simulated on your laptop)
+   - Can send/receive traffic between each other
+   - Metrics: Throughput, RSSI, packet loss
+
+✅ WIFI CHANNEL SELECTION (2, 6, or 11)
+   - Default: Channel 6
+   - Baseline traffic: 200-500 packets/second
+   - Signal: -45 to -50 dBm
+   - Throughput: 4-5 Mbps
+
+✅ METRICS MONITORING BY CONTROLLER
+   - Printed FREQUENTLY (every 5 seconds)
+   - Shows current channel in use
+   - Tracks all important metrics
+   - Real-time network status
+
+═══════════════════════════════════════════════════════════════════════════
+2. NEW ATTACK DEMONSTRATION SYSTEM
+═══════════════════════════════════════════════════════════════════════════
+
+📁 NEW FILES CREATED:
+
+   1. attacker.py
+      ├─ Simulates pseudo-jamming attack
+      ├─ Floods WiFi channel with fake packets
+      ├─ Can target any channel (2, 6, 11)
+      ├─ Spoofs attacker ID
+      └─ Receives isolation notifications from controller
+
+   2. demo_attack_scenario.py
+      ├─ Orchestrates the entire demonstration
+      ├─ Starts all components in correct order
+      ├─ Launches attacker at right time
+      ├─ Monitors progress
+      └─ Gracefully shuts down all processes
+
+   3. quick_start.py
+      ├─ One-command way to run the demo
+      ├─ Prints helpful intro message
+      └─ Launches demo_attack_scenario.py
+
+   4. ATTACK_DETECTION_GUIDE.md
+      ├─ Complete documentation
+      ├─ Architecture diagrams
+      ├─ How to run everything
+      └─ Detailed explanation of each component
+
+═══════════════════════════════════════════════════════════════════════════
+3. HOW THE ATTACK WORKS
+═══════════════════════════════════════════════════════════════════════════
+
+ATTACKER.PY BEHAVIOR:
+   
+   1. Identifies target channel (default: 6)
+   2. Generates jamming packets (100 packets per batch)
+   3. Floods the WiFi AP with rapid packets
+   4. Simulates impact:
+      
+      BASELINE              vs    ATTACK
+      ─────────────────────────────────────
+      Packet Rate: 300 pps        8000+ pps    ← JUMPS 25x
+      RSSI: -45 dBm               -70 dBm      ← DROPS SIGNIFICANTLY
+      Throughput: 4.5 Mbps        0.9 Mbps     ← FALLS 80%
+      Packet Loss: 0.5%           80%          ← INCREASES DRAMATICALLY
+
+   5. Sends "jam_packet" messages to controller (detectable)
+   6. Listens for isolation notice from controller
+   7. Stops when isolated or duration expires
+
+═══════════════════════════════════════════════════════════════════════════
+4. HOW THE CONTROLLER DETECTS & ISOLATES
+═══════════════════════════════════════════════════════════════════════════
+
+DETECTION (checks every 2 seconds):
+   
+   if (packet_rate > 5000 AND rssi < -60 AND throughput < 2.0):
+       🚨 JAMMING ATTACK DETECTED!
+
+METRICS DISPLAY (printed every 5 seconds):
+   
+   ══════════════════════════════════════
+   [CHANNEL 6 METRICS] - Update #10
+   ══════════════════════════════════════
+     Throughput:        0.90 Mbps      ← Attack indicator!
+     RSSI:             -70 dBm         ← Attack indicator!
+     Packet Loss:      80.0%           ← Attack indicator!
+     Packet Rate:    8200 pps          ← Attack indicator!
+     Phase:           attack
+     Jammer Status:   DETECTED ⚠️
+     
+     Detected Attackers:
+       - ATTACKER_5432 (packets: 45000)
+     
+     Isolated IPs:
+       - 127.0.0.1 🔒
+
+ISOLATION ACTIONS:
+   
+   1. Identify: "ATTACKER_5432 from 127.0.0.1"
+   2. Block: "Blocking IP 127.0.0.1"
+   3. Notify: Send isolation notice to attacker
+   4. Switch: "Move from Channel 6 → Channel 11"
+   5. Log: Save results to controller_results.json
+
+═══════════════════════════════════════════════════════════════════════════
+5. QUICK START - RUN THE DEMO
+═══════════════════════════════════════════════════════════════════════════
+
+OPTION 1: ONE COMMAND (EASIEST)
+   
+   $ python3 quick_start.py
+   
+   This will:
+   ✓ Show intro banner
+   ✓ Start controller (port 9000)
+   ✓ Start AP agent with 2 virtual nodes (port 9001)
+   ✓ Start monitor agent (traffic analysis)
+   ✓ Wait 10 seconds
+   ✓ Launch attacker (15 seconds of jamming)
+   ✓ Show real-time detection and isolation
+   ✓ Shutdown gracefully
+   
+   Total runtime: ~30-40 seconds
+
+OPTION 2: AUTOMATED DEMO
+   
+   $ python3 demo_attack_scenario.py
+
+OPTION 3: MANUAL (4 TERMINALS)
+   
+   Terminal 1:
+   $ python3 sdn_controller.py
+   
+   Terminal 2:
+   $ python3 ap_agent.py
+   
+   Terminal 3:
+   $ python3 monitor_agent.py
+   
+   Terminal 4 (after 10 seconds):
+   $ python3 attacker.py --channel 6 --duration 15
+
+OPTION 4: WITH WEB DASHBOARD
+   
+   Terminal 1: python3 sdn_controller.py
+   Terminal 2: python3 ap_agent.py
+   Terminal 3: python3 monitor_agent.py
+   Terminal 4: python3 dashboard.py
+   Terminal 5 (after 10 seconds): python3 attacker.py
+   
+   Then open browser: http://localhost:5000
+
+═══════════════════════════════════════════════════════════════════════════
+6. WHAT YOU'LL SEE (EXPECTED OUTPUT)
+═══════════════════════════════════════════════════════════════════════════
+
+PHASE 1 - BASELINE (0-10 seconds):
+
+   [AP] Ch:6 | 4.50Mbps | RSSI:-45dBm | Phase:baseline
+   [Monitor] 300 pps | Phase: baseline
+   
+   ======================================================================
+   [CHANNEL 6 METRICS] - Update #1
+   ======================================================================
+     Throughput:        4.50 Mbps
+     RSSI:             -45 dBm
+     Packet Loss:       0.5%
+     Packet Rate:     300 pps
+     Phase:           baseline
+     Jammer Status:   Clean ✓
+   ======================================================================
+
+PHASE 2 - ATTACK (10-15 seconds):
+
+   [ATTACKER_5432] 🔴 STARTING JAMMING ATTACK!
+   [ATTACKER_5432] Target Channel: 6
+   [ATTACKER_5432] Flooding 127.0.0.1:9001...
+   [ATTACKER_5432] 🔴 ATTACKING | Time: 2.1s | Packets: 50000 | Rate: 8000 pps
+   
+   [AP] Ch:6 | 0.90Mbps | RSSI:-70dBm | Phase:attack
+   [Monitor] 8200 pps | Phase: attack
+   
+   ======================================================================
+   [CHANNEL 6 METRICS] - Update #3
+   ======================================================================
+     Throughput:        0.90 Mbps
+     RSSI:             -70 dBm
+     Packet Loss:      80.0%
+     Packet Rate:    8200 pps
+     Phase:           attack
+     Jammer Status:   DETECTED ⚠️
+   ======================================================================
+
+PHASE 3 - DETECTION (15-20 seconds):
+
+   [Controller] 🔴 JAM PACKET DETECTED!
+     Attacker ID: ATTACKER_5432
+     Channel: 6
+     Source IP: 127.0.0.1
+
+   [Controller] 🚨 JAMMING ATTACK DETECTED ON CHANNEL 6!
+     Throughput: 0.90 Mbps
+     RSSI: -70 dBm
+     Packet Rate: 8200 pps
+     Decision: Switch from Channel 6 → Channel 11
+
+   [Controller] 🔒 ISOLATING ATTACKER!
+     Attacker ID: ATTACKER_5432
+     Source IP: 127.0.0.1
+     Action: BLOCKING IP 127.0.0.1
+
+   [ATTACKER_5432] 🚨 DETECTED AND ISOLATED BY CONTROLLER!
+   [ATTACKER_5432] Reason: Jamming attack detected and isolated
+
+PHASE 4 - RECOVERY (20+ seconds):
+
+   [AP] Ch:11 | 4.50Mbps | RSSI:-45dBm | Phase:recovery
+   [Monitor] 300 pps | Phase: recovery
+   
+   ======================================================================
+   [CHANNEL 11 METRICS] - Update #4
+   ======================================================================
+     Throughput:        4.50 Mbps
+     RSSI:             -45 dBm
+     Packet Loss:       0.5%
+     Packet Rate:     300 pps
+     Phase:           recovery
+     Jammer Status:   Clean ✓
+     
+     Isolated IPs:
+       - 127.0.0.1 🔒
+   ======================================================================
+
+═══════════════════════════════════════════════════════════════════════════
+7. CONTROLLER CHANNEL METRICS OUTPUT
+═══════════════════════════════════════════════════════════════════════════
+
+The controller prints detailed channel metrics every 5 seconds:
+
+Structure:
+   ══════════════════════════════════════════════════════════════════════
+   [CHANNEL X METRICS] - Update #N
+   ══════════════════════════════════════════════════════════════════════
+     Throughput:        X.XX Mbps
+     RSSI:             -XX dBm
+     Packet Loss:       X.X%
+     Packet Rate:     XXXX pps
+     Phase:           (baseline|attack|recovery)
+     Jammer Status:   (Clean ✓ | DETECTED ⚠️)
+     
+     [Detected Attackers - if any]
+       - ATTACKER_ID (packets: N)
+     
+     [Isolated IPs - if any]
+       - IP_ADDRESS 🔒
+   ══════════════════════════════════════════════════════════════════════
+
+Indicators of Attack:
+
+   🟢 CLEAN BASELINE:
+      Throughput: 4-5 Mbps
+      RSSI: -45 to -50 dBm
+      Packet Rate: 200-500 pps
+      Packet Loss: <1%
+
+   🔴 UNDER ATTACK:
+      Throughput: <1 Mbps        ← DROPS 80%+
+      RSSI: -65 to -75 dBm      ← DROPS 20+ dBm
+      Packet Rate: 8000+ pps    ← INCREASES 25x
+      Packet Loss: >75%         ← INCREASES 75x
+
+═══════════════════════════════════════════════════════════════════════════
+8. ATTACKER.PY COMMAND-LINE OPTIONS
+═══════════════════════════════════════════════════════════════════════════
+
+Usage:
+   python3 attacker.py [OPTIONS]
+
+Options:
+   --target-ap IP              Target AP IP (default: 127.0.0.1)
+   --ap-port PORT              Target AP port (default: 9001)
+   --controller IP             Controller IP (default: 127.0.0.1)
+   --controller-port PORT      Controller port (default: 9000)
+   --channel N                 WiFi channel to jam (2, 6, or 11)
+   --duration N                Attack duration in seconds
+   --delay N                   Delay before starting attack (seconds)
+
+Examples:
+
+   # Jam channel 6 for 20 seconds
+   $ python3 attacker.py --channel 6 --duration 20
+
+   # Jam channel 11 after 5 second delay for 30 seconds
+   $ python3 attacker.py --channel 11 --delay 5 --duration 30
+
+   # Attack different channels
+   $ python3 attacker.py --channel 2 --duration 15
+   $ python3 attacker.py --channel 6 --duration 15
+   $ python3 attacker.py --channel 11 --duration 15
+
+═══════════════════════════════════════════════════════════════════════════
+9. NETWORK COMMUNICATION
+═══════════════════════════════════════════════════════════════════════════
+
+UDP Ports Used:
+
+   Port 9000: Controller (receives metrics)
+   Port 9001: AP Agent (receives commands from controller)
+   Port 9002: Dashboard (receives metrics for visualization)
+   Port 9003: Attacker (receives isolation notifications)
+   Port 5000: Web Dashboard (HTTP)
+
+Message Types:
+
+   ap_metrics          → [Throughput, RSSI, Channel, Phase]
+   monitor_metrics     → [Packet Rate, Packet Count, Phase, Jammer Status]
+   jam_packet          → [Attacker ID, Channel, Timestamp]
+   controller_action   → [Action Type, Parameters]
+   isolation_notice    → [Attacker ID, Isolated IP, Reason]
+
+═══════════════════════════════════════════════════════════════════════════
+10. RESULTS & LOGGING
+═══════════════════════════════════════════════════════════════════════════
+
+After demo completes, check controller_results.json:
+
+   {
+     "timestamp": "2026-03-03T10:30:45.123456",
+     "system": "SDN WiFi Testbed with Attack Detection",
+     "jammer_detected": true,
+     "detection_time": "2026-03-03T10:30:55.234567",
+     "channels_monitored": [2, 6, 11],
+     "current_channel": 11,
+     "detected_attackers": ["ATTACKER_5432"],
+     "isolated_ips": ["127.0.0.1"],
+     "metrics_count": 150
+   }
+
+═══════════════════════════════════════════════════════════════════════════
+11. TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════════════
+
+Problem: "Address already in use: 9000"
+Solution: 
+   $ lsof -i :9000
+   $ pkill -f "python3 sdn_controller.py"
+
+Problem: No metrics being printed
+Solution:
+   - Check all 3 components are running
+   - Verify ports 9000-9003 are available
+   - Ensure no firewall is blocking UDP
+
+Problem: Attacker won't start
+Solution:
+   - Make sure controller and AP agent are already running
+   - Check if ports 9000, 9001 are accessible
+   - Try with explicit IP: python3 attacker.py --target-ap 127.0.0.1
+
+Problem: Controller not detecting attack
+Solution:
+   - Check attack duration is long enough (>5 seconds recommended)
+   - Verify metrics are actually reaching controller
+   - Lower detection threshold if needed
+
+═══════════════════════════════════════════════════════════════════════════
+12. PROJECT STRUCTURE
+═══════════════════════════════════════════════════════════════════════════
+
+/home/sriram/S4_IOT/
+│
+├── sdn_controller.py              ← Decision maker (ENHANCED)
+├── ap_agent.py                    ← WiFi AP simulator (2 virtual nodes)
+├── monitor_agent.py               ← Traffic monitor
+│
+├── attacker.py                    ← ✨ NEW - Jamming attacker
+├── demo_attack_scenario.py        ← ✨ NEW - Automated demo
+├── quick_start.py                 ← ✨ NEW - One-command launcher
+│
+├── dashboard.py                   ← Web dashboard (port 5000)
+├── ATTACK_DETECTION_GUIDE.md      ← ✨ NEW - Complete guide
+│
+├── controller_results.json        ← Results log (generated after run)
+└── [README & other files]
+
+═══════════════════════════════════════════════════════════════════════════
+13. NEXT STEPS
+═══════════════════════════════════════════════════════════════════════════
+
+IMMEDIATE:
+   1. Run: python3 quick_start.py
+   2. Watch the demo run
+   3. See attack detection & isolation in action
+   4. Check controller_results.json for results
+
+CUSTOMIZATION:
+   1. Edit attacker.py to change jamming pattern
+   2. Modify sdn_controller.py to adjust detection thresholds
+   3. Change dashboard.py colors and metrics displayed
+   4. Add more sophisticated attack patterns
+
+ADVANCED:
+   1. Implement machine learning detection
+   2. Add geo-location tracking
+   3. Create network topology visualization
+   4. Integrate with real WiFi hardware
+
+═══════════════════════════════════════════════════════════════════════════
+
+Ready to demonstrate? Run:
+
+   $ python3 quick_start.py
+
+═══════════════════════════════════════════════════════════════════════════

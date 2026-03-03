@@ -1,0 +1,446 @@
+╔═════════════════════════════════════════════════════════════════════════╗
+║                     SDN ATTACK DETECTION SYSTEM                         ║
+║                      VISUAL ARCHITECTURE & FLOW                         ║
+╚═════════════════════════════════════════════════════════════════════════╝
+
+═════════════════════════════════════════════════════════════════════════
+SYSTEM ARCHITECTURE
+═════════════════════════════════════════════════════════════════════════
+
+                              WiFi Network
+                            (Channel 2, 6, 11)
+                                  │
+                ┌──────────────────┼──────────────────┐
+                │                  │                  │
+        ┌───────▼────────┐ ┌──────▼────────┐  ┌─────▼──────────┐
+        │ Virtual Node 1 │ │ Virtual Node2 │  │ Attacker       │
+        │ (Connected)    │ │ (Connected)   │  │ (Jamming)      │
+        └───────┬────────┘ └──────┬────────┘  └─────┬──────────┘
+                │                  │                  │
+                └──────────────────┼──────────────────┘
+                                   │ Pseudo Jamming
+                                   │ on WiFi
+                        ┌──────────▼──────────┐
+                        │   WiFi AP Agent     │
+                        │ (Simulates Network) │
+                        │ ┌────────────────┐  │
+                        │ │ Throughput: 8.5│  │
+                        │ │ RSSI: -45 dBm  │  │
+                        │ │ Channel: 6     │  │
+                        │ │ Loss: 0.5%     │  │
+                        │ └────────────────┘  │
+                        └─────────┬─────────┬─┘
+                                  │         │
+                     UDP (9000)   │         │ UDP (9001)
+                     METRICS      │         │ COMMANDS
+                                  │         │
+                        ┌─────────▼──┐  ┌──▼──────────┐
+                        │  Monitor   │  │ Listener    │
+                        │   Agent    │  │ (Receives   │
+                        │            │  │  commands)  │
+                        │ Tracks:    │  │             │
+                        │ • Packets  │  │             │
+                        │ • Rate     │  │             │
+                        │ • Phases   │  │             │
+                        └─────────┬──┘  └──────────────┘
+                                  │
+                     UDP (9000)   │ METRICS
+                                  │
+                        ┌─────────▼──────────────┐
+                        │  SDN CONTROLLER        │
+                        │                        │
+                        │ RECEIVE:               │
+                        │ ├─ ap_metrics          │
+                        │ ├─ monitor_metrics     │
+                        │ └─ jam_packets         │
+                        │                        │
+                        │ ANALYZE:               │
+                        │ ├─ Track channels      │
+                        │ ├─ Check thresholds    │
+                        │ └─ Detect anomalies    │
+                        │                        │
+                        │ DECIDE:                │
+                        │ ├─ Identify attacker   │
+                        │ ├─ Block IP            │
+                        │ └─ Switch channel      │
+                        │                        │
+                        │ PRINT:                 │
+                        │ ├─ Every 5s metrics    │
+                        │ ├─ Channel status      │
+                        │ └─ Attack alerts       │
+                        └────────┬───┬───┬──────┘
+                                 │   │   │
+                    UDP (9001)   │   │   │ UDP (9003)
+                    ACTION CMD   │   │   │ ISOLATION
+                                 │   │   │
+                        ┌────────▼┐  │   └─────────┬────────┐
+                        │         │  │             │        │
+                    [AP AGENT]    │  │     [ATTACKER] [DASHBOARD]
+                    Switches      │  │     Stops    Displays
+                    Channel       │  │     Jamming  Metrics
+
+
+═════════════════════════════════════════════════════════════════════════
+DATA FLOW - METRICS PATH
+═════════════════════════════════════════════════════════════════════════
+
+TIME: 0-10 SECONDS (BASELINE)
+
+AP Agent                Monitor Agent             Controller
+────────────────────────────────────────────────────────────────
+                                                   │
+Send metrics ──────────────────────────────────►  │ Receives
+Throughput: 4.5 Mbps                              │ ap_metrics
+RSSI: -45 dBm                                     │
+Channel: 6                                        │
+                                                   │
+                                          ┌──────▼────────┐
+                                          │ Store by      │
+                                          │ channel       │
+                                          │ Ch 6:         │
+                                          │ • Throughput  │
+                                          │ • RSSI        │
+                                          │ • Packet Rate │
+                                          └───────┬───────┘
+                                                  │
+                                          ┌───────▼───────┐
+                                          │ Print Metrics │
+                                          │ Every 5 sec   │
+                                          │               │
+                                          │ Throughput:   │
+                                          │  4.50 Mbps    │
+                                          │ RSSI: -45 dBm │
+                                          │ Rate: 300 pps │
+                                          │ Status: CLEAN │
+                                          └───────────────┘
+
+
+TIME: 10-15 SECONDS (ATTACK)
+
+Attacker             AP Agent                  Monitor Agent         Controller
+─────────────────────────────────────────────────────────────────────────────
+│                      │                          │                     │
+├─ Start jamming       │                          │                     │
+│  Flood packets ─────►│ Metrics degraded         │                     │
+│  Rate: 8000 pps      │ Throughput: 0.9 Mbps    │                     │
+│  Spoofed ID          │ RSSI: -70 dBm       ────────────────────────►  │
+│                      │ Channel: 6           Send metrics              │ Receives
+│ + Send jam_packet ──────────────────────────────────────────────────►  │ degraded
+│   messages                                                             │ metrics
+│                                                  │                     │
+│                                                  │ + Send mon_metrics  │ Receives
+│                                                  │ Packet Rate: 8000   │ high
+│                                                  │ pps ──────────────►  │ packet
+│                                                  │                     │ rate
+│                                                  │                     │
+│                                                  │     ┌───────────────▼────┐
+│                                                  │     │ Analyze            │
+│                                                  │     │ Packet_rate > 5000 │
+│                                                  │     │ RSSI < -60         │
+│                                                  │     │ Throughput < 2.0   │
+│                                                  │     │ DETECTED! ⚠️        │
+│                                                  │     └────────────┬───────┘
+│                                                  │                  │
+│                                                  │    ┌─────────────▼──────┐
+│                                                  │    │ Print Alert:       │
+│                                                  │    │ 🚨 ATTACK ON CH 6! │
+│                                                  │    │ Packets: 45000     │
+│                                                  │    │ Attacker ID found  │
+│                                                  │    └─────────┬──────────┘
+│                                                  │              │
+│                                                  │  ┌───────────▼──────────┐
+│                                                  │  │ Send action:         │
+│                                                  │  │ • Block IP           │
+│                                                  │  │ • Switch Channel     │
+│                                                  │  │ 6 → 11               │
+│                                                  │  └──────────┬───────────┘
+│                                                  │             │
+│ ◄────────────────────────────────────────────── Isolation ────┤
+│ (Attacker receives isolation_notice)                           │
+│ STOP JAMMING!                                                  │
+
+
+TIME: 15-20 SECONDS (ISOLATION)
+
+Attacker              Controller                System
+─────────────────────────────────────────────────────────────
+│                       │                          │
+├─ Receive isolation ───►│                          │
+│  notice               │                          │
+│ STOP ─────────────────┤                          │
+│                       │                          │
+│                       ├─ Block IP: 127.0.0.1    │
+│                       │                          │
+│                       ├─ Switch to Channel 11    │
+│                       │                          │
+│                       ├─ Send command ──────────►│ AP switches
+│                       │  to AP Agent             │ to Ch 11
+│                       │                          │
+│                       │  ┌──────────────────┐   │
+│                       │  │ Print Update:    │   │
+│                       │  │ 🔒 ISOLATED!     │   │
+│                       │  │ IP: 127.0.0.1    │   │
+│                       │  │ Channel: 11      │   │
+│                       │  │ Status: CLEAN ✓  │   │
+│                       │  └──────────────────┘   │
+
+
+TIME: 20+ SECONDS (RECOVERY)
+
+AP Agent              Controller
+────────────────────────────────────
+Send metrics  ───────►  Receives
+Throughput: 4.5 Mbps    
+RSSI: -45 dBm         
+Channel: 11           Prints every 5s:
+                      ════════════════════════
+                      CH 11 METRICS (recovered)
+                      ════════════════════════
+                      Throughput:  4.50 Mbps ✓
+                      RSSI: -45 dBm ✓
+                      Rate: 300 pps ✓
+                      Status: CLEAN ✓
+                      
+                      Isolated: 127.0.0.1 🔒
+
+
+═════════════════════════════════════════════════════════════════════════
+DETECTION THRESHOLD VISUALIZATION
+═════════════════════════════════════════════════════════════════════════
+
+NORMAL (BASELINE) vs ATTACK:
+
+Metric              Baseline        Threshold       Attack
+─────────────────────────────────────────────────────────
+Packet Rate         200-500 pps     > 5000 pps      8000+ pps ⚠️
+RSSI               -45 to -50 dBm   < -60 dBm      -65 to -75 dBm ⚠️
+Throughput          4-5 Mbps        < 2.0 Mbps     0.8-1.5 Mbps ⚠️
+
+
+DETECTION LOGIC:
+
+                    ┌─────────────────────┐
+                    │ Metric Received     │
+                    └──────────┬──────────┘
+                               │
+                    ┌──────────▼──────────┐
+                    │ Check:              │
+                    │ Packet_rate > 5000? │
+                    └──────┬──────┬───────┘
+                           │      │
+                        YES│      │NO
+                           │      │
+                    ┌──────▼──┐   └───────┬─────┐
+                    │ Check:  │          │WAIT │
+                    │RSSI<-60?│          │MORE │
+                    └──┬───┬──┘          │DATA │
+                       │   │            └─────┘
+                    YES│   │NO
+                       │   └──────┬───────┐
+                    ┌──▼──┐      │SKIP   │
+                    │Check│      │ALERT  │
+                    │Thru<2│     └───────┘
+                    └──┬──┬┘
+                       │  │
+                    YES│  │NO
+                       │  └──┬────────┐
+                    ┌──▼──┐ │NORMAL  │
+                    │ALERT│ │TRAFFIC │
+                    │JAMMER└────────┘
+                    │DETECTED! 🚨
+                    │
+                    ├─ Identify: ATTACKER_5432
+                    ├─ Source: 127.0.0.1
+                    ├─ Channel: 6
+                    │
+                    ├─ ACTIONS:
+                    │  ├─ Block IP
+                    │  ├─ Send isolation notice
+                    │  ├─ Switch channel
+                    │  └─ Log results
+                    │
+                    └─ PRINT STATUS:
+                       [Controller] 🚨 ATTACK DETECTED!
+                       [Controller] 🔒 ISOLATED IP: 127.0.0.1
+                       [Controller] Channel: 6 → 11
+
+
+═════════════════════════════════════════════════════════════════════════
+STATE MACHINE - NETWORK PHASES
+═════════════════════════════════════════════════════════════════════════
+
+               ┌─────────────┐
+               │  BASELINE   │ Normal traffic (0-10s)
+               │             │ Metrics: Good
+               │ Phase:      │ Throughput: 4.5 Mbps
+               │ baseline    │ RSSI: -45 dBm
+               │ Channel: 6  │ Packet Rate: 300 pps
+               └──────┬──────┘
+                      │
+        Attack Starts │
+        Attacker      │
+        launches ─────┼──────────────────────┐
+        jamming       │                      │
+                      │              ┌───────▼──────┐
+                      │              │  ATTACK      │
+                      │              │              │
+                      │              │ Phase:       │
+                      │              │ attack       │
+                      │              │ Channel: 6   │
+                      │              │              │
+                      │              │ Metrics:     │
+                      │              │ Throughput: <1│
+                      │              │ RSSI: -70    │
+                      │              │ Rate: 8000+  │
+                      │              │              │
+                      │              │ ⚠️ DEGRADED  │
+                      │              └───────┬──────┘
+                      │                      │
+                      │         Controller   │
+                      │         detects ─────┼─────────┐
+                      │         anomalies    │         │
+                      │                      │   ┌─────▼──────┐
+                      │                      │   │  ISOLATION │
+                      │                      │   │             │
+                      │                      │   │ Actions:    │
+                      │                      │   │ • Block IP  │
+                      │                      │   │ • Switch CH │
+                      │                      │   │             │
+                      │                      │   │ Attacker:   │
+                      │                      │   │ STOPPED 🛑  │
+                      │                      │   └─────┬───────┘
+                      │                      │         │
+                      │                      │    ┌────▼────┐
+                      │                      │    │RECOVERY │
+                      │                      │    │          │
+                      │                      │    │ Channel: │
+                      │                      │    │ 11       │
+                      │                      │    │          │
+                      │                      │    │ Metrics: │
+                      │                      │    │ Restored │
+                      │                      │    │          │
+                      │                      │    │ ✓ CLEAN  │
+                      │                      │    └──────────┘
+                      │                      │
+                      └──────────────────────┘
+
+═════════════════════════════════════════════════════════════════════════
+TIMELINE - EXPECTED SEQUENCE
+═════════════════════════════════════════════════════════════════════════
+
+TIME    EVENT                                      SYSTEM STATE
+─────────────────────────────────────────────────────────────────
+0s      Quick start launched                       Starting...
+        Controller, AP, Monitor start
+
+2s      All components ready                       Waiting for metrics
+        Baseline metrics flowing
+
+5s      [CH 6 METRICS]                             🟢 BASELINE
+        Throughput: 4.50 Mbps
+        Rate: 300 pps
+        Status: CLEAN ✓
+
+10s     [CH 6 METRICS]                             🟢 BASELINE
+        Still good...                              Monitoring...
+
+10s     Attacker launches!                         ATTACK STARTS
+        Jamming begins on CH 6
+
+12s     [CH 6 METRICS]                             🔴 DEGRADED
+        Throughput: 0.90 Mbps ⚠️
+        Rate: 8200 pps ⚠️
+        RSSI: -70 dBm ⚠️
+        Status: DETECTING...
+
+15s     [Controller] 🔴 JAM PACKET DETECTED!       ATTACK CONFIRMED
+        Attacker ID: ATTACKER_5432
+        Source IP: 127.0.0.1
+
+15s     [Controller] 🚨 ATTACK ON CH 6!            ISOLATING...
+        Metrics anomalies confirmed
+        Switching to CH 11
+
+16s     [Controller] 🔒 ISOLATED!                  ATTACK MITIGATED
+        Blocked: 127.0.0.1
+        Channel switched to 11
+
+16s     [ATTACKER] 🚨 DETECTED AND ISOLATED!       ATTACKER STOPPED
+        Received isolation notice
+        Attack halted
+
+18s     [CH 11 METRICS]                            🟢 RECOVERY
+        Throughput: 4.50 Mbps ✓
+        Rate: 300 pps ✓
+        Status: CLEAN ✓
+
+25s     [CH 11 METRICS]                            🟢 RECOVERED
+        System fully restored
+        Attacker permanently blocked
+
+30s     Demo ends                                  COMPLETE ✓
+        Results saved to JSON
+
+
+═════════════════════════════════════════════════════════════════════════
+COMMAND FLOW - WHO TALKS TO WHOM
+═════════════════════════════════════════════════════════════════════════
+
+AP AGENT         PORT    CONTROLLER        MONITOR           ATTACKER
+─────────────────────────────────────────────────────────────────────
+
+            ┌─── 9000 ───►  Sends metrics  ◄─── 9000 ────────┐
+            │              Receives cmds                       │
+            │                                                   │
+    Sends metrics                    Receives metrics      Sends jamming
+    & responds to                    & controls system    packets & gets
+    controller commands              isolated attackers    isolation notice
+
+
+UDP MESSAGE EXAMPLES:
+
+From AP Agent → Controller (9000):
+{
+  "type": "ap_metrics",
+  "timestamp": 1700000000.123,
+  "data": {
+    "throughput": 4.50,
+    "rssi": -45,
+    "loss": 0.5,
+    "channel": 6,
+    "phase": "baseline"
+  }
+}
+
+From Attacker → Controller (9000):
+{
+  "type": "jam_packet",
+  "attacker_id": "ATTACKER_5432",
+  "sequence": 12345,
+  "timestamp": 1700000010.456,
+  "channel": 6,
+  "power": 20,
+  "noise": -75
+}
+
+From Controller → Attacker (9003):
+{
+  "type": "isolation_notice",
+  "attacker_id": "ATTACKER_5432",
+  "isolated_ip": "127.0.0.1",
+  "reason": "Jamming attack detected and isolated",
+  "timestamp": 1700000015.789
+}
+
+From Controller → AP Agent (9001):
+{
+  "type": "controller_action",
+  "timestamp": 1700000015.789,
+  "action": {
+    "action": "switch_channel",
+    "new_channel": 11
+  }
+}
+
+
+═════════════════════════════════════════════════════════════════════════

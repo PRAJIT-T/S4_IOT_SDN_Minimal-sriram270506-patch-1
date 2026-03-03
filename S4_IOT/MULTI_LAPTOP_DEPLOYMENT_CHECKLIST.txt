@@ -1,0 +1,402 @@
+MULTI-LAPTOP DEPLOYMENT CHECKLIST
+==================================
+
+This guide will help you deploy the SDN attack detection system
+across multiple physical laptops connected via a WiFi router.
+
+
+PHASE 1: PREPARATION
+====================
+
+[ ] 1. Get IP Addresses from Each Laptop
+    On each laptop, open terminal and run:
+    
+    $ ifconfig | grep 'inet '
+    
+    You should see output like:
+    inet 192.168.1.101  netmask 255.255.255.0
+    
+    Write down the IPs:
+    - Laptop 1 (Controller):    192.168.1.___
+    - Laptop 2 (AP Agent):      192.168.1.___
+    - Laptop 3 (Monitor):       192.168.1.___
+    - Laptop 4 (Attacker):      192.168.1.___
+
+[ ] 2. Verify All Laptops on Same WiFi Network
+    On each laptop, check connected WiFi:
+    
+    $ iwconfig
+    
+    Look for: ESSID or SSID should be the same on all laptops
+    
+    Example: SSID="MyWiFiRouter"
+
+[ ] 3. Test Connectivity Between Laptops
+    From Laptop 1, ping Laptop 2:
+    
+    $ ping 192.168.1.___ (Laptop 2 IP)
+    
+    Expected: Responses with minimal loss (0-5%)
+    
+    Repeat for all laptop pairs.
+
+[ ] 4. Check Firewall Settings
+    Ensure ports are open on all laptops:
+    - Port 9000 (Controller metrics)
+    - Port 9001 (AP commands)
+    - Port 9002 (Monitor metrics)
+    - Port 9003 (Isolation notices)
+    
+    Ubuntu firewall:
+    $ sudo ufw allow 9000:9003/udp
+    
+    Or disable temporarily:
+    $ sudo ufw disable
+
+
+PHASE 2: FILE PREPARATION
+=========================
+
+[ ] 5. Create Deployment Directory on Each Laptop
+    On each laptop:
+    
+    $ mkdir -p ~/sdn_deployment
+    $ cd ~/sdn_deployment
+
+[ ] 6. Copy Python Files to Each Laptop
+    Copy these files to ~/sdn_deployment/ on each laptop:
+    
+    - sdn_controller_multi_laptop.py (Laptop 1 only)
+    - ap_agent_multi_laptop.py (Laptop 2 only)
+    - monitor_agent_multi_laptop.py (Laptop 3 only)
+    - attacker_multi_laptop.py (Laptop 4 only)
+    
+    You can use scp:
+    $ scp <file> user@192.168.1.XXX:~/sdn_deployment/
+
+[ ] 7. Verify Python 3 Installation
+    On each laptop:
+    
+    $ python3 --version
+    
+    Should be Python 3.7 or higher
+
+[ ] 8. Test Syntax of Each Script
+    On each laptop, in ~/sdn_deployment/:
+    
+    $ python3 -m py_compile *_multi_laptop.py
+    
+    Should complete without errors
+
+
+PHASE 3: CONFIGURATION
+======================
+
+[ ] 9. Create Configuration File
+    On Laptop 1, run:
+    
+    $ cd ~/sdn_deployment
+    $ python3 setup_multi_laptop.py \
+        --controller-ip 192.168.1.101 \
+        --ap-ip 192.168.1.102 \
+        --monitor-ip 192.168.1.103 \
+        --attacker-ip 192.168.1.104
+    
+    (Replace IPs with YOUR IPs from Step 1)
+    
+    This creates: config_multi_laptop.json
+
+[ ] 10. Verify Configuration File
+    Check the file was created:
+    
+    $ cat config_multi_laptop.json
+    
+    Should show all 4 IP addresses
+
+
+PHASE 4: DEPLOYMENT
+===================
+
+STEP A: Start Controller on Laptop 1
+────────────────────────────────────
+[ ] 11. Open Terminal on Laptop 1
+    
+    $ cd ~/sdn_deployment
+    $ python3 sdn_controller_multi_laptop.py --host 0.0.0.0 --port 9000
+    
+    Wait for output:
+    "Listening on 0.0.0.0:9000"
+    "Waiting for agent connections..."
+
+STEP B: Start AP Agent on Laptop 2
+─────────────────────────────────
+[ ] 12. Wait 2-3 seconds for controller to fully start
+    (So it can receive connections from agents)
+
+[ ] 13. Edit ap_agent_multi_laptop.py on Laptop 2
+    
+    $ nano ap_agent_multi_laptop.py
+    
+    Find line: self.controller_ip = controller_ip
+    Replace with: self.controller_ip = '192.168.1.101'
+    (Use YOUR Controller IP from Step 1)
+    
+    Find line: self.listen_socket.bind(...)
+    Replace with: self.listen_socket.bind(('0.0.0.0', 9001))
+    
+    Save: Ctrl+O, Enter, Ctrl+X
+
+[ ] 14. Start AP Agent on Laptop 2
+    
+    $ cd ~/sdn_deployment
+    $ python3 ap_agent_multi_laptop.py
+    
+    Wait for output:
+    "Listening on 0.0.0.0:9001"
+    "Controller at 192.168.1.101:9000"
+
+STEP C: Start Monitor on Laptop 3
+──────────────────────────────────
+[ ] 15. Wait 2-3 seconds for AP to connect to controller
+
+[ ] 16. Edit monitor_agent_multi_laptop.py on Laptop 3
+    
+    $ nano monitor_agent_multi_laptop.py
+    
+    Find line: self.controller_ip = controller_ip
+    Replace with: self.controller_ip = '192.168.1.101'
+    (Use YOUR Controller IP from Step 1)
+    
+    Save: Ctrl+O, Enter, Ctrl+X
+
+[ ] 17. Start Monitor on Laptop 3
+    
+    $ cd ~/sdn_deployment
+    $ python3 monitor_agent_multi_laptop.py --controller 192.168.1.101
+    
+    Wait for output:
+    "Monitor Agent Started"
+    "Reporting to controller at 192.168.1.101:9000"
+
+STEP D: Check Controller Output
+────────────────────────────────
+[ ] 18. Check Laptop 1 (Controller) Terminal
+    
+    Should see printed metrics every 5 seconds:
+    "═══ [CHANNEL 6 METRICS] ═══"
+    "Throughput: 4.50 Mbps"
+    "RSSI: -45 dBm"
+    "Status: Clean ✓"
+
+STEP E: Start Attacker on Laptop 4
+──────────────────────────────────
+[ ] 19. Wait 10-15 seconds (let system stabilize)
+
+[ ] 20. Start Attacker on Laptop 4
+    
+    $ cd ~/sdn_deployment
+    $ python3 attacker_multi_laptop.py \
+        --target-ap 192.168.1.102 \
+        --controller 192.168.1.101 \
+        --channel 6 \
+        --duration 15
+    
+    (Replace IPs with YOUR IPs from Step 1)
+    
+    Wait for output:
+    "STARTING JAMMING ATTACK!"
+
+
+PHASE 5: OBSERVATION
+====================
+
+[ ] 21. Watch Controller Terminal (Laptop 1)
+    
+    You should see 3 phases:
+    
+    Phase 1 (Baseline - First 10 seconds):
+      Throughput: 4.50 Mbps
+      RSSI: -45 dBm
+      Status: Clean
+    
+    Phase 2 (Attack - Seconds 10-15):
+      Throughput: 0.90 Mbps   <- DROPPED
+      RSSI: -70 dBm           <- DEGRADED
+      Status: JAMMING DETECTED ⚠️
+    
+    Phase 3 (Isolation - Second 15+):
+      Message: "JAMMING ATTACK DETECTED!"
+      Message: "ISOLATING ATTACKER!"
+      Source IP: 192.168.1.104
+
+[ ] 22. Check Attacker Terminal (Laptop 4)
+    
+    You should see:
+    "Sent 100 jam packets"
+    "Sent 200 jam packets"
+    ...
+    "Attack duration completed"
+    "ISOLATED by controller"
+
+
+PHASE 6: VERIFICATION
+=====================
+
+[ ] 23. Verify Attack Detection
+    On Controller (Laptop 1), confirm you saw:
+    ✓ Baseline metrics (clean network)
+    ✓ Attack metrics (degraded)
+    ✓ Detection message
+    ✓ Isolation message
+
+[ ] 24. Verify Multi-Laptop Architecture
+    Confirm that:
+    ✓ Controller runs on Laptop 1
+    ✓ AP Agent runs on Laptop 2
+    ✓ Monitor runs on Laptop 3
+    ✓ Attacker runs on Laptop 4
+    ✓ All connected via WiFi router
+    ✓ NO components on localhost
+
+[ ] 25. Test Scalability (Optional)
+    Try running attack with different parameters:
+    
+    $ python3 attacker_multi_laptop.py \
+        --target-ap 192.168.1.102 \
+        --controller 192.168.1.101 \
+        --channel 6 \
+        --duration 30
+    
+    This runs 30-second attack instead of 15
+
+
+PHASE 7: TROUBLESHOOTING
+========================
+
+If Controller sees NO metrics after 5 seconds:
+[ ] Check AP Agent terminal for errors
+[ ] Verify controller IP in ap_agent_multi_laptop.py is correct
+[ ] Ping from AP laptop to controller: ping 192.168.1.101
+[ ] Check firewall: sudo ufw status
+
+If Attacker won't connect:
+[ ] Make sure controller is still running
+[ ] Check firewall allows port 9003: sudo ufw allow 9003/udp
+[ ] Verify target-ap IP is correct
+[ ] Ping AP laptop from attacker: ping 192.168.1.102
+
+If Network latency is high:
+[ ] Check WiFi signal strength
+[ ] Reduce distance between laptops
+[ ] Check for interference (microwaves, cordless phones)
+[ ] Switch WiFi channel
+
+If components disconnect:
+[ ] Restart in order: Controller → AP → Monitor → Attacker
+[ ] Allow 2-3 seconds between startups
+[ ] Check network remains stable (run ping in separate window)
+
+
+PHASE 8: ADVANCED OPTIONS
+==========================
+
+Custom Channel (instead of 6):
+[ ] Edit sdn_controller_multi_laptop.py:
+    Find: self.channel = 6
+    Change to: self.channel = 11  (or 1, 2, 6, 11)
+
+Custom Metrics Interval:
+[ ] Edit sdn_controller_multi_laptop.py:
+    Find: time.sleep(5)  in metrics printing loop
+    Change to: time.sleep(2)  (print every 2 seconds)
+
+Custom Attack Duration:
+[ ] When starting attacker, change --duration:
+    $ python3 attacker_multi_laptop.py ... --duration 60
+
+
+PHASE 9: DEPLOYMENT SUCCESS CRITERIA
+====================================
+
+Your deployment is SUCCESSFUL if:
+
+✓ Controller receives metrics every 5 seconds
+✓ Metrics show baseline values initially
+✓ Attack causes metrics to degrade
+✓ Controller detects attack automatically
+✓ Controller sends isolation to AP
+✓ Attacker receives isolation notice
+✓ All 4 laptops remain connected throughout
+✓ System returns to baseline after attack ends
+
+
+WHAT YOU'VE DEMONSTRATED
+=========================
+
+With this multi-laptop deployment, you have:
+
+1. ✅ Real Network Architecture
+   - Not simulated on localhost
+   - Actual WiFi network topology
+   - Multiple physical machines
+
+2. ✅ Distributed System Design
+   - Decentralized decision making
+   - Agent-based architecture
+   - Real network communication
+
+3. ✅ Attack Detection
+   - Real-time metrics analysis
+   - Automatic anomaly detection
+   - Reactive isolation
+
+4. ✅ Production-Ready System
+   - Scalable to more than 4 nodes
+   - Flexible IP configuration
+   - Robust error handling
+
+5. ✅ WiFi Security
+   - Jamming attack detection
+   - Attacker identification
+   - Automatic response
+
+
+NEXT STEPS
+==========
+
+After successful deployment:
+
+1. Experiment with different attack patterns
+   - Try longer durations
+   - Try multiple attackers
+   - Try different channels
+
+2. Enhance detection thresholds
+   - Modify alert levels in controller
+   - Tune sensitivity
+
+3. Add more monitoring
+   - Track isolation effectiveness
+   - Log attack statistics
+   - Create reports
+
+4. Scale to more nodes
+   - Add more virtual nodes
+   - Test with more attackers
+   - Monitor scalability
+
+
+CONTACT & SUPPORT
+=================
+
+Issues? Check:
+1. All laptops on same WiFi: ifconfig | grep 'inet '
+2. Firewall allows UDP: sudo ufw status
+3. Python 3 installed: python3 --version
+4. Ports in use: netstat -an | grep 900
+5. Syntax errors: python3 -m py_compile *.py
+
+Reference configuration: config_multi_laptop.json
+Deployment helper: setup_multi_laptop.py
+Controller logs: Check terminal output
+Agent logs: Check respective terminal outputs

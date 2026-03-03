@@ -1,0 +1,300 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                                                                           ║
+║              🎯 QUICK REFERENCE CHEAT SHEET 🎯                           ║
+║                  SDN Attack Detection System                             ║
+║                                                                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════════════
+LAUNCH THE DEMO (Pick One)
+═══════════════════════════════════════════════════════════════════════════
+
+🚀 EASIEST - One Command
+   $ python3 quick_start.py
+
+🤖 AUTOMATED - With Progress
+   $ python3 demo_attack_scenario.py
+
+📋 MANUAL - 4 Terminals
+   Terminal 1: python3 sdn_controller.py
+   Terminal 2: python3 ap_agent.py
+   Terminal 3: python3 monitor_agent.py
+   Terminal 4: python3 attacker.py --channel 6 --duration 15
+
+🌐 WITH WEB DASHBOARD - 5 Terminals
+   Terminal 1: python3 sdn_controller.py
+   Terminal 2: python3 ap_agent.py
+   Terminal 3: python3 monitor_agent.py
+   Terminal 4: python3 dashboard.py
+   Terminal 5: python3 attacker.py --channel 6 --duration 15
+   Browser: http://localhost:5000
+
+═══════════════════════════════════════════════════════════════════════════
+WHAT'S HAPPENING (Timeline)
+═══════════════════════════════════════════════════════════════════════════
+
+0-10 SECONDS: BASELINE
+   Controller prints metrics:
+   ✓ Throughput: 4.50 Mbps
+   ✓ RSSI: -45 dBm
+   ✓ Packet Rate: 300 pps
+   ✓ Status: Clean ✓
+
+10-15 SECONDS: ATTACK
+   Attacker launches jamming:
+   ⚠️ Throughput: 0.90 Mbps (DROPS 80%)
+   ⚠️ RSSI: -70 dBm (DROPS 25 dBm)
+   ⚠️ Packet Rate: 8200 pps (JUMPS 25x)
+   ⚠️ Packet Loss: 80% (INCREASES 75x)
+
+15-16 SECONDS: DETECTION & ISOLATION
+   Controller detects anomalies:
+   🚨 JAMMING ATTACK DETECTED!
+   🔒 ISOLATING ATTACKER
+   Channel: 6 → 11
+
+16+ SECONDS: RECOVERY
+   System recovers on channel 11:
+   ✓ Throughput: 4.50 Mbps (RESTORED)
+   ✓ RSSI: -45 dBm (RESTORED)
+   ✓ Packet Rate: 300 pps (RESTORED)
+   ✓ Status: Clean ✓
+
+═══════════════════════════════════════════════════════════════════════════
+ATTACKER.PY QUICK COMMANDS
+═══════════════════════════════════════════════════════════════════════════
+
+Jam Channel 6 (15 seconds)
+   $ python3 attacker.py --channel 6 --duration 15
+
+Jam Channel 11 (30 seconds)
+   $ python3 attacker.py --channel 11 --duration 30
+
+Jam with Delay (start after 5 seconds)
+   $ python3 attacker.py --delay 5 --duration 20
+
+Jam Different Channel
+   $ python3 attacker.py --channel 2 --duration 15
+
+═══════════════════════════════════════════════════════════════════════════
+WHAT THE CONTROLLER PRINTS
+═══════════════════════════════════════════════════════════════════════════
+
+EVERY 2 SECONDS:
+   Analyzes: packet_rate, rssi, throughput
+   If anomalies → ATTACK DETECTED!
+
+EVERY 5 SECONDS:
+   ══════════════════════════════════════════════════════════════════════
+   [CHANNEL 6 METRICS] - Update #N
+   ══════════════════════════════════════════════════════════════════════
+     Throughput:        X.XX Mbps
+     RSSI:             -XX dBm
+     Packet Loss:       X.X%
+     Packet Rate:     XXXX pps
+     Phase:           baseline|attack|recovery
+     Jammer Status:   Clean ✓ or DETECTED ⚠️
+
+WHEN ATTACK DETECTED:
+   [Controller] 🔴 JAM PACKET DETECTED!
+   [Controller] 🚨 JAMMING ATTACK DETECTED ON CHANNEL X!
+   [Controller] 🔒 ISOLATING ATTACKER!
+
+═══════════════════════════════════════════════════════════════════════════
+DETECTION THRESHOLDS
+═══════════════════════════════════════════════════════════════════════════
+
+ATTACK IF ALL THREE:
+   ✓ Packet Rate > 5000 pps (vs normal 200-500)
+   ✓ RSSI < -60 dBm (vs normal -45 to -50)
+   ✓ Throughput < 2.0 Mbps (vs normal 4-5)
+
+Visualization:
+   
+   Packet Rate:      300 ┤ NORMAL        8000 ┤⚠️ ATTACK
+   RSSI:            -45 ┤ NORMAL        -70  ┤⚠️ ATTACK
+   Throughput:      4.5 ┤ NORMAL        0.9  ┤⚠️ ATTACK
+
+═══════════════════════════════════════════════════════════════════════════
+PORTS USED
+═══════════════════════════════════════════════════════════════════════════
+
+9000 ← Controller (listens for metrics)
+9001 ← AP Agent (listens for commands)
+9002 ← Dashboard (listens for metrics)
+9003 ← Attacker (listens for isolation)
+5000 ← Web Dashboard (HTTP)
+
+═══════════════════════════════════════════════════════════════════════════
+TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════════════
+
+❌ "Address already in use: 9000"
+   $ pkill -f "python3"
+   OR
+   $ lsof -i :9000 (to see what's using it)
+
+❌ "No metrics printing"
+   → Verify all 3 components are running
+   → Check ports 9000-9001 aren't blocked
+
+❌ "Attacker won't connect"
+   → Make sure controller started first
+   → Give it 2-3 seconds to initialize
+
+❌ "Attack not detected"
+   → Make sure attacker is actually running
+   → Check if metrics are reaching controller
+   → Verify attack duration is >5 seconds
+
+═══════════════════════════════════════════════════════════════════════════
+FILES AT A GLANCE
+═══════════════════════════════════════════════════════════════════════════
+
+CORE:
+   sdn_controller.py      ← Makes decisions, prints metrics
+   ap_agent.py            ← Simulates 2 virtual nodes
+   monitor_agent.py       ← Tracks traffic
+   dashboard.py           ← Web visualization
+
+NEW (WHAT WAS ADDED):
+   attacker.py            ← Pseudo jamming attack
+   demo_attack_scenario.py ← Full automation
+   quick_start.py         ← One-command launcher
+
+DOCS:
+   ATTACK_DETECTION_GUIDE.md    ← Full reference
+   PROJECT_SETUP.txt            ← Setup guide
+   SYSTEM_ARCHITECTURE.txt      ← Diagrams
+   EXAMPLES.py                  ← Run examples
+   README_ATTACK_DEMO.md        ← Quick guide
+
+═══════════════════════════════════════════════════════════════════════════
+YOUR IMPLEMENTATION CHECKLIST
+═══════════════════════════════════════════════════════════════════════════
+
+✅ 2 VIRTUAL NODES
+   └─ Connected to WiFi AP
+   └─ Exchange traffic
+   └─ Generate metrics
+
+✅ CHANNEL MONITORING
+   └─ Tracks channels 2, 6, 11
+   └─ Shows which channel nodes use
+
+✅ FREQUENT METRICS PRINTING
+   └─ Every 5 seconds
+   └─ Shows: Throughput, RSSI, Rate, Loss, Phase, Status
+
+✅ ATTACKER.PY
+   └─ Pseudo jamming
+   └─ Floods WiFi channel
+   └─ Detectable by controller
+
+✅ DETECTION
+   └─ 3-metric threshold analysis
+   └─ Identifies anomalies
+   └─ Pinpoints attack time
+
+✅ ISOLATION
+   └─ Identifies attacker IP
+   └─ Blocks the IP
+   └─ Stops jamming
+
+✅ AUTOMATION
+   └─ One-command demo
+   └─ Full orchestration
+   └─ Graceful shutdown
+
+═══════════════════════════════════════════════════════════════════════════
+MESSAGE TYPES (Network Communication)
+═══════════════════════════════════════════════════════════════════════════
+
+AP METRICS (9000):
+   {"type": "ap_metrics", "data": {"throughput": 4.5, "rssi": -45, ...}}
+
+MONITOR METRICS (9000):
+   {"type": "monitor_metrics", "data": {"packet_rate": 300, ...}}
+
+JAM PACKETS (9000):
+   {"type": "jam_packet", "attacker_id": "ATTACKER_5432", "channel": 6}
+
+CONTROLLER ACTION (9001):
+   {"type": "controller_action", "action": {"action": "switch_channel", ...}}
+
+ISOLATION NOTICE (9003):
+   {"type": "isolation_notice", "attacker_id": "ATTACKER_5432", ...}
+
+═══════════════════════════════════════════════════════════════════════════
+VIEW RESULTS
+═══════════════════════════════════════════════════════════════════════════
+
+After demo completes:
+   $ cat controller_results.json
+
+Pretty print:
+   $ python3 -m json.tool < controller_results.json
+
+Result includes:
+   - Jammer detected: true/false
+   - Detection time
+   - Channels monitored
+   - Current channel
+   - Detected attackers list
+   - Isolated IPs list
+   - Total metrics collected
+
+═══════════════════════════════════════════════════════════════════════════
+KEYBOARD SHORTCUTS
+═══════════════════════════════════════════════════════════════════════════
+
+Ctrl+C              Stop any running process
+Ctrl+C twice        Force stop (if once doesn't work)
+
+═══════════════════════════════════════════════════════════════════════════
+ONE-LINER CHEAT SHEET
+═══════════════════════════════════════════════════════════════════════════
+
+Verify setup:        python3 verify_setup.py
+Quick demo:          python3 quick_start.py
+Automated demo:      python3 demo_attack_scenario.py
+Kill all:            pkill -f "python3"
+See all examples:    python3 EXAMPLES.py
+Check results:       cat controller_results.json
+View JSON pretty:    python3 -m json.tool < controller_results.json
+Web dashboard:       python3 dashboard.py (then http://localhost:5000)
+
+═══════════════════════════════════════════════════════════════════════════
+METRICS AT A GLANCE
+═══════════════════════════════════════════════════════════════════════════
+
+NORMAL BASELINE:
+   ✓ Throughput: 4-5 Mbps
+   ✓ RSSI: -45 to -50 dBm
+   ✓ Packet Rate: 200-500 pps
+   ✓ Packet Loss: <1%
+   ✓ Latency: ~10-20ms
+
+UNDER JAMMING ATTACK:
+   ⚠️ Throughput: 0.8-1.5 Mbps (80% DROP)
+   ⚠️ RSSI: -65 to -75 dBm (25 dBm DROP)
+   ⚠️ Packet Rate: 8000-10000 pps (25x INCREASE)
+   ⚠️ Packet Loss: 75-85% (75x INCREASE)
+   ⚠️ Latency: 100+ms (INCREASES SIGNIFICANTLY)
+
+DETECTION CRITERIA:
+   IF rate>5000 AND rssi<-60 AND throughput<2.0:
+       ALERT = ATTACK_DETECTED
+
+RECOVERY:
+   ✓ All metrics restore to baseline values
+   ✓ Attacker permanently blocked
+   ✓ Channel switched to clean frequency
+
+═══════════════════════════════════════════════════════════════════════════
+
+🎯 READY TO START?
+
+   $ python3 quick_start.py
+
+═══════════════════════════════════════════════════════════════════════════
