@@ -113,11 +113,11 @@ class Controller:
             chan_util = self.latest_ap.get('channel_utilization_percent', 0)
             jammer_on = self.latest_mon.get('jammer_active', False)
 
-            # Establish baseline in first 5 seconds
-            if self.baseline_rssi is None and elapsed < 6:
+            # Establish baseline on first valid data (before attack starts)
+            if self.baseline_rssi is None and not jammer_on and pkt_rate < self.thresh_pkt:
                 self.baseline_rssi = avg_rssi
                 self.baseline_tp = throughput if throughput > 0 else 9.0
-                logger.info(f"📊 Baseline: RSSI={self.baseline_rssi:.0f} dBm, Throughput={self.baseline_tp:.1f} Mbps")
+                logger.info(f"📊 Baseline set: RSSI={self.baseline_rssi:.0f} dBm, Throughput={self.baseline_tp:.1f} Mbps")
 
             # --- Print status ---
             print()
@@ -143,7 +143,7 @@ class Controller:
             logger.info("━" * 65)
 
             # --- Detection ---
-            if self.baseline_rssi is not None and not self.jammer_detected and elapsed > 6:
+            if self.baseline_rssi is not None and not self.jammer_detected:
                 score = 0
                 reasons = []
 
@@ -173,7 +173,15 @@ class Controller:
                     logger.warning(f"  Source: Monitor laptop ({self.monitor_ip})")
                     logger.warning("🚨" * 20)
 
+                    # Action 0: Notify AP of attack (degrades metrics)
+                    self._send_to_ap({
+                        'command': 'attack_notify',
+                        'reason': 'jamming_detected'
+                    })
+                    logger.info(f"  ✓ Sent ATTACK NOTIFY to AP")
+
                     # Action 1: Blacklist MAC
+                    time.sleep(1)
                     self._send_to_ap({
                         'command': 'blacklist_mac',
                         'target_mac': suspect_mac,

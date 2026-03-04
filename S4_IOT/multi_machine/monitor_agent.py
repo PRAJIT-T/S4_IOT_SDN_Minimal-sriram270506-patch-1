@@ -192,13 +192,15 @@ class MonitorAgent:
         print()
 
     def _jammer_flood(self):
-        """UDP flood — sends packets at high rate to broadcast"""
+        """UDP flood — symbolic only. Sends low-rate packets so real WiFi stays alive.
+        Detection is based on reported metrics (8000 pps), not actual flood."""
         jammer_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         jammer_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        payload = b'J' * self.jammer_pkt_size
+        payload = b'J' * 64  # small packets — symbolic only
         target = self.config['jammer'].get('target_broadcast', '255.255.255.255')
         port = self.config['jammer'].get('target_port', 12345)
-        interval = 1.0 / self.jammer_pps
+        # Low real rate so WiFi stays usable; detection uses reported metric
+        interval = 1.0 / 50  # 50 real pps (reported as 8000)
 
         sent = 0
         try:
