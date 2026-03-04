@@ -1,109 +1,120 @@
-================================================================================
-  HOW TO RUN - 3 LAPTOPS, 1 ROUTER, SDN ATTACK DETECTION
-================================================================================
+================================================================
+  SDN ATTACK DETECTION — 3 LAPTOP DEMO
+================================================================
 
-  3 laptops. Same WiFi router. One command each. That's it.
+  3 laptops on same WiFi. One command each. 30 seconds.
 
-       ┌────────────────────┐
-       │   YOUR WiFi ROUTER │
-       └──┬───────┬───────┬─┘
-          │       │       │
+       ┌──────────────────┐
+       │  YOUR WiFi ROUTER│
+       └──┬──────┬──────┬─┘
+          │      │      │
       LAPTOP 1  LAPTOP 2  LAPTOP 3
       Controller AP Agent  Monitor+Attacker
-      (brain)   (2 nodes)  (jammer)
 
 
-================================================================================
-  BEFORE YOU START (one-time only)
-================================================================================
-
-  1. Connect all 3 laptops to the SAME WiFi router.
-
-  2. Get each laptop's IP:
-       ip addr show | grep "inet " | grep -v 127.0.0.1
-
-     Write them down, e.g.:
-       Laptop 1 = 192.168.1.100
-       Laptop 2 = 192.168.1.101
-       Laptop 3 = 192.168.1.102
-
-  3. Copy the multi_machine/ folder to all 3 laptops.
-
-  4. On ALL 3 laptops, edit multi_machine/config.json:
-     Open the file, find these 3 lines near the top (lines 10-12):
-
-       "controller_ip": "192.168.1.100",
-       "controller_port": 9000,
-       "ap_ip": "192.168.1.101",
-       "monitor_ip": "192.168.1.102",
-
-     Change ONLY the IPs to YOUR real IPs. Example:
-       Laptop 1 IP is 10.135.40.17  → "controller_ip": "10.135.40.17"
-       Laptop 2 IP is 10.135.40.20  → "ap_ip": "10.135.40.20"
-       Laptop 3 IP is 10.135.40.25  → "monitor_ip": "10.135.40.25"
-
-     Save. Same config.json on all 3 laptops.
-
-  5. Open firewall on all 3 (if active):
-       sudo ufw allow 9000:9003/udp
+  SETUP (already done):
+    • All 3 laptops on same WiFi
+    • multi_machine/ folder on all 3
+    • config.json has your real IPs (lines 10-13):
+        controller_ip = Laptop 1's IP
+        ap_ip         = Laptop 2's IP
+        monitor_ip    = Laptop 3's IP
 
 
-================================================================================
-  RUN IT (3 commands, 3 laptops)
-================================================================================
+================================================================
+  RUN (in this order)
+================================================================
 
-  LAPTOP 1 (Controller) — run first:
+  LAPTOP 1 — open terminal:
+    cd multi_machine
+    python3 controller_server.py config.json
 
-      cd multi_machine && python3 controller_server.py config.json
+  LAPTOP 2 — open terminal (after 3 sec):
+    cd multi_machine
+    python3 ap_agent.py config.json
 
-  LAPTOP 2 (AP Agent, 2 simulated nodes) — run after 3 sec:
-
-      cd multi_machine && python3 ap_agent.py config.json
-
-  LAPTOP 3 (Monitor + Attacker) — run after 3 sec:
-
-      cd multi_machine && python3 monitor_agent.py config.json
-
-  Done. Now watch Laptop 1.
+  LAPTOP 3 — open terminal (after 3 sec):
+    cd multi_machine
+    python3 monitor_agent.py config.json
 
 
-================================================================================
-  WHAT HAPPENS (automatic, just watch)
-================================================================================
+================================================================
+  OUTPUT YOU WILL SEE
+================================================================
 
-   0-10 sec │ BASELINE — clean network
-            │ Controller shows: Throughput 9 Mbps, RSSI -55 dBm
-            │ Monitor pings AP laptop: 0% loss, ~5ms latency
-            │
-  10-20 sec │ ATTACK — jammer auto-activates on Laptop 3
-            │ Controller detects: 8000 pps, throughput drops to 0
-            │ Monitor pings AP laptop: 100% packet loss — UNREACHABLE
-            │ Controller: ⚠️ JAMMER DETECTED! Confidence 85.5%
-            │ Controller: ✓ MAC blacklisted, ✓ Channel 6 → 11
-            │
-    20+ sec │ RECOVERY — jammer auto-stops, network recovers
-            │ Monitor pings AP laptop: 0% loss again
-            │ Throughput returns to 9 Mbps
+  LAPTOP 1 (Controller):
+  ─────────────────────
+    ✓ AP Agent connected from 10.135.40.17
+    ✓ Monitor Agent connected from 10.135.40.120
+    📊 Baseline: RSSI=-52 dBm, Throughput=9.0 Mbps
 
-  That's the full demo. ~30 seconds total.
+    [Every 2 seconds — clean status table:]
+      AP: 10.135.40.17   Monitor: 10.135.40.120
+      Channel: 6   Clients: 2   RSSI: -52 dBm
+      Throughput: 9.2 Mbps   PktRate: 0 pps
+      Status: 🟢 CLEAN
+
+    [At ~12 seconds — attack detected:]
+      🚨 JAMMING ATTACK DETECTED!
+      Confidence: 100 pts
+      Suspect MAC: aa:bb:cc:dd:ee:ff
+      Source: Monitor laptop (10.135.40.120)
+      ✓ Sent BLACKLIST command to AP
+      ✓ Sent CHANNEL SWITCH → CH 6 → CH 11
+
+    [After attack:]
+      Throughput: 9.1 Mbps   PktRate: 0 pps
+      Status: 🔴 ATTACK DETECTED — ISOLATED
 
 
-================================================================================
-  OPTIONAL: WEB DASHBOARD (Laptop 1, second terminal)
-================================================================================
+  LAPTOP 2 (AP Agent):
+  ─────────────────────
+    AP IP: 10.135.40.17
+    SIMULATED NODES:
+      Node-1: MAC=aa:11:22:33:44:01  RSSI=-52 dBm
+      Node-2: MAC=aa:11:22:33:44:02  RSSI=-56 dBm
 
-      cd multi_machine && python3 dashboard.py config.json
+    [Every 2 seconds:]
+      CH=6  Nodes=2  RSSI=-53dBm  ChanUtil=25%  [✅ Normal]
 
-  Open browser: http://127.0.0.1:8080
- 
+    [When attack detected by controller:]
+      🔒 CONTROLLER COMMAND: BLACKLIST MAC
+        Blocked MAC: aa:bb:cc:dd:ee:ff
+      📡 CONTROLLER COMMAND: CHANNEL SWITCH
+        Channel: 6 → 11
 
-================================================================================
-  IF SOMETHING GOES WRONG
-================================================================================
 
-  "Connection refused"  → Controller must start FIRST. Check IPs.
-  "Address in use"      → pkill -f controller_server && pkill -f agent
-  Can't ping other      → Same WiFi? Firewall off? sudo ufw disable
-  No attack detected    → Wait 15+ sec. Check monitor is running.
+  LAPTOP 3 (Monitor + Attacker):
+  ──────────────────────────────
+    Monitor IP: 10.135.40.120
+    MAC: aa:bb:cc:dd:ee:ff
+    AP (ping target): 10.135.40.17
 
-================================================================================
+    [0-10 sec — baseline:]
+      🟢 Clean | Ping 10.135.40.17: 0% loss, 4.2ms
+      Throughput: 9.1 Mbps
+
+    [10 sec — attack starts automatically:]
+      🚨 ACTIVATING JAMMING ATTACK!
+      Source: 10.135.40.120   Target: 10.135.40.17
+      Rate: 8000 packets/sec
+
+    [10-20 sec — during attack:]
+      🔴 ATTACK | Ping 10.135.40.17: 100% loss — Dest Unreachable
+      Throughput: 0.3 Mbps | PktRate: 8000 pps
+
+    [20 sec — attack stops automatically:]
+      ✓ JAMMER DEACTIVATED — Network recovering
+
+    [20+ sec — recovery:]
+      🟢 Clean | Ping 10.135.40.17: 0% loss, 5.1ms
+      Throughput: 9.3 Mbps
+
+
+================================================================
+  TROUBLESHOOTING
+================================================================
+  "Address in use"  → pkill -f python3 , wait 5 sec, retry
+  No output         → Controller must start FIRST
+  Can't connect     → Check IPs in config.json, same WiFi?
+================================================================

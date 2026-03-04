@@ -1,326 +1,219 @@
 #!/usr/bin/env python3
 """
-SDN Controller Server
-- Listens for metrics from AP and Monitor agents
-- Implements jammer detection algorithm
-- Makes decisions (MAC blacklist, channel switch)
-- Provides metrics to Flask dashboard
+SDN Controller — The brain. Receives metrics, detects attacks, sends commands.
+Pure Python. No system commands. Runs on Laptop 1.
 """
 
 import json
 import socket
 import threading
 import time
-from datetime import datetime
-from collections import deque
 import logging
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(asctime)s] [CONTROLLER] %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [CONTROLLER] %(message)s')
 logger = logging.getLogger(__name__)
 
 
-class JammerDetectionEngine:
-    """Detects jammer based on packet rate, RSSI, and throughput"""
-    
-    def __init__(self, config):
-        self.config = config['detection']
-        self.baseline_rssi = -55
-        self.baseline_throughput = 9.0
-        self.baseline_established = False
-        
-    def establish_baseline(self, rssi, throughput):
-        """Establish baseline metrics during first 5 seconds"""
-        self.baseline_rssi = rssi
-        self.baseline_throughput = throughput
-        self.baseline_established = True
-        logger.info(f"Baseline established: RSSI={rssi}dBm, Throughput={throughput:.2f}Mbps")
-    
-    def detect_jammer(self, pkt_rate, rssi, throughput):
-        """
-        Multi-factor jammer detection
-        Returns: (detected: bool, confidence: float, reason: str)
-        """
-        if not self.baseline_established:
-            return False, 0, "baseline_not_established"
-        
-        score = 0
-        reasons = []
-        
-        # Factor 1: High packet rate
-        if pkt_rate > self.config['packet_rate_threshold_pps']:
-            score += 40
-            reasons.append(f"high_pkt_rate({pkt_rate}pps)")
-        
-        # Factor 2: RSSI degradation
-        rssi_drop = self.baseline_rssi - rssi
-        if rssi_drop > self.config['rssi_degradation_threshold_dbm']:
-            score += 30
-            reasons.append(f"rssi_drop({rssi_drop}dBm)")
-        
-        # Factor 3: Throughput loss
-        if self.baseline_throughput > 0:
-            throughput_loss = (self.baseline_throughput - throughput) / self.baseline_throughput
-            if throughput_loss > (self.config['throughput_loss_threshold_percent'] / 100.0):
-                score += 30
-                reasons.append(f"throughput_loss({throughput_loss*100:.1f}%)")
-        
-        detected = score >= self.config['detection_confidence_threshold']
-        reason_str = " + ".join(reasons) if reasons else "no_anomalies"
-        
-        return detected, score, reason_str
-
-
-class ControllerServer:
-    """Main SDN controller server"""
-    
+class Controller:
     def __init__(self, config_file):
-        with open(config_file, 'r') as f:
+        with open(config_file) as f:
             self.config = json.load(f)
-        
-        self.detector = JammerDetectionEngine(self.config)
-        self.server_socket = None
+
+        self.ip = self.config['network']['controller_ip']
+        self.port = self.config['network']['controller_port']
+        self.ap_ip = self.config['network']['ap_ip']
+        self.monitor_ip = self.config['network']['monitor_ip']
+
+        # Detection thresholds
+        det = self.config['detection']
+        self.thresh_pkt = det['packet_rate_threshold_pps']
+        self.thresh_rssi = det['rssi_degradation_threshold_dbm']
+        self.thresh_tp = det['throughput_loss_threshold_percent']
+        self.thresh_conf = det['detection_confidence_threshold']
+        self.check_interval = det['detection_check_interval_seconds']
+
+        self.new_channel = self.config['wifi']['ap_channel_switch']
+
+        # State
         self.running = True
-        
-        # Metrics storage
-        self.latest_ap_metrics = {}
-        self.latest_monitor_metrics = {}
-        self.metrics_history = deque(maxlen=1000)
-        self.controller_actions = []
-        
-        # State tracking
+        self.ap_addr = None
+        self.monitor_addr = None
+        self.latest_ap = {}
+        self.latest_mon = {}
+        self.baseline_rssi = None
+        self.baseline_tp = 9.0
         self.jammer_detected = False
-        self.jammer_mac = None
+        self.channel_switched = False
         self.current_channel = 6
-        self.channels_switched = False
-        self.ap_address = None
-        self.monitor_address = None
-        
-        logger.info("Controller initialized")
-    
+        self.update_count = 0
+
+        # UDP socket
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind((self.ip, self.port))
+
+        self._print_banner()
+
+    def _print_banner(self):
+        logger.info("=" * 65)
+        logger.info("  SDN CONTROLLER STARTED")
+        logger.info(f"  Controller IP (this laptop): {self.ip}:{self.port}")
+        logger.info(f"  Expecting AP Agent at:       {self.ap_ip}")
+        logger.info(f"  Expecting Monitor at:        {self.monitor_ip}")
+        logger.info(f"  Detection thresholds:")
+        logger.info(f"    Packet Rate > {self.thresh_pkt} pps  → +40 pts")
+        logger.info(f"    RSSI drop   > {self.thresh_rssi} dBm   → +30 pts")
+        logger.info(f"    Throughput loss > {self.thresh_tp}%   → +30 pts")
+        logger.info(f"    Confidence threshold: {self.thresh_conf} pts")
+        logger.info("=" * 65)
+        logger.info("Waiting for AP Agent and Monitor to connect...\n")
+
     def start(self):
-        """Start UDP server"""
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        
-        controller_ip = self.config['network']['controller_ip']
-        controller_port = self.config['network']['controller_port']
-        
-        self.server_socket.bind((controller_ip, controller_port))
-        logger.info(f"Controller listening on {controller_ip}:{controller_port}")
-        
-        # Start listener thread
-        listener_thread = threading.Thread(target=self._listener_loop, daemon=True)
-        listener_thread.start()
-        
-        # Start detection/action thread
-        action_thread = threading.Thread(target=self._detection_loop, daemon=True)
-        action_thread.start()
-        
-        logger.info("Controller threads started")
-    
-    def _listener_loop(self):
-        """Listen for incoming metrics from agents"""
+        threading.Thread(target=self._listener, daemon=True).start()
+        threading.Thread(target=self._detection_loop, daemon=True).start()
+
+    def _listener(self):
         while self.running:
             try:
-                data, addr = self.server_socket.recvfrom(4096)
-                message = json.loads(data.decode('utf-8'))
-                
-                source = message.get('source')
-                if source == 'ap_agent':
-                    self.ap_address = addr
-                    self.latest_ap_metrics = message.get('ap_metrics', {})
-                    logger.debug(f"AP metrics received: CH={self.latest_ap_metrics.get('channel')}")
-                
-                elif source == 'monitor_agent':
-                    self.monitor_address = addr
-                    self.latest_monitor_metrics = message.get('monitor_metrics', {})
-                    logger.debug(f"Monitor metrics received: PKT_RATE={self.latest_monitor_metrics.get('jammer_packet_rate_pps')}pps")
-                
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse JSON from {addr}")
-            except Exception as e:
-                logger.error(f"Listener error: {e}")
-            
+                data, addr = self.sock.recvfrom(8192)
+                msg = json.loads(data.decode())
+                src = msg.get('source')
+                if src == 'ap_agent':
+                    if self.ap_addr is None:
+                        logger.info(f"✓ AP Agent connected from {addr[0]}:{addr[1]}")
+                    self.ap_addr = addr
+                    self.latest_ap = msg.get('ap_metrics', {})
+                elif src == 'monitor_agent':
+                    if self.monitor_addr is None:
+                        logger.info(f"✓ Monitor Agent connected from {addr[0]}:{addr[1]}")
+                    self.monitor_addr = addr
+                    self.latest_mon = msg.get('monitor_metrics', {})
+            except Exception:
+                pass
             time.sleep(0.01)
-    
+
     def _detection_loop(self):
-        """Periodic jammer detection and response"""
-        check_interval = self.config['detection']['detection_check_interval_seconds']
-        start_time = time.time()
-        baseline_duration = 5  # Establish baseline for first 5 seconds
-        
+        start = time.time()
         while self.running:
-            elapsed = time.time() - start_time
-            
-            # Skip if no metrics yet
-            if not self.latest_ap_metrics or not self.latest_monitor_metrics:
-                time.sleep(check_interval)
+            time.sleep(self.check_interval)
+            if not self.latest_ap or not self.latest_mon:
                 continue
-            
-            # Extract current metrics
-            rssi_list = list(self.latest_ap_metrics.get('rssi_per_client', {}).values())
-            avg_rssi = sum(rssi_list) / len(rssi_list) if rssi_list else -55
-            
-            pkt_rate = self.latest_monitor_metrics.get('jammer_packet_rate_pps', 0)
-            
-            # Calculate throughput (mock for now, will be from iperf3)
-            throughput = self.latest_monitor_metrics.get('local_throughput_mbps', 9.0)
-            
-            # Establish baseline if not already done
-            if not self.detector.baseline_established and elapsed < baseline_duration:
-                self.detector.establish_baseline(avg_rssi, 9.0)
-            
-            # Perform detection
-            if self.detector.baseline_established and not self.jammer_detected:
-                detected, confidence, reason = self.detector.detect_jammer(pkt_rate, avg_rssi, throughput)
-                
-                if detected and elapsed > baseline_duration:
-                    logger.warning(f"⚠️  JAMMER DETECTED! Confidence: {confidence:.1f}% ({reason})")
-                    self._on_jammer_detected()
-            
-            # Handle recovery if jammer is isolated
-            if self.jammer_detected and self.jammer_mac:
-                if not self.channels_switched and elapsed > baseline_duration + 2.5:
-                    logger.info("Initiating channel switch...")
-                    self._switch_channel()
-            
-            time.sleep(check_interval)
-    
-    def _on_jammer_detected(self):
-        """Handle jammer detection"""
-        self.jammer_detected = True
-        self.jammer_mac = self.latest_monitor_metrics.get('my_mac', 'unknown')
-        
-        action = {
-            'timestamp': time.time(),
-            'action': 'jammer_detected',
-            'confidence': 85.5,
-            'suspect_mac': self.jammer_mac,
-            'channel': self.current_channel
-        }
-        self.controller_actions.append(action)
-        logger.info(f"Action logged: {action['action']}")
-        
-        # Immediately blacklist MAC
-        self._blacklist_mac()
-    
-    def _blacklist_mac(self):
-        """Blacklist jammer MAC on AP"""
-        if not self.jammer_mac or not self.ap_address:
-            logger.error("Cannot blacklist: missing MAC or AP address")
-            return
-        
-        # Send command to AP via UDP
-        command = {
-            'command': 'blacklist_mac',
-            'target_mac': self.jammer_mac,
-            'reason': 'jammer_flooding'
-        }
-        
-        try:
-            self.server_socket.sendto(
-                json.dumps(command).encode('utf-8'),
-                self.ap_address
-            )
-            
-            action = {
-                'timestamp': time.time(),
-                'action': 'mac_blacklisted',
-                'target_mac': self.jammer_mac,
-                'result': 'sent'
-            }
-            self.controller_actions.append(action)
-            logger.info(f"✓ MAC blacklist command sent: {self.jammer_mac}")
-            
-        except Exception as e:
-            logger.error(f"Failed to send blacklist command: {e}")
-    
-    def _switch_channel(self):
-        """Switch AP to different channel"""
-        if not self.ap_address:
-            logger.error("Cannot switch channel: missing AP address")
-            return
-        
-        new_channel = self.config['wifi']['ap_channel_switch']
-        
-        command = {
-            'command': 'switch_channel',
-            'target_channel': new_channel,
-            'reason': 'jammer_on_current_channel'
-        }
-        
-        try:
-            self.server_socket.sendto(
-                json.dumps(command).encode('utf-8'),
-                self.ap_address
-            )
-            
-            self.channels_switched = True
-            self.current_channel = new_channel
-            
-            action = {
-                'timestamp': time.time(),
-                'action': 'channel_switch',
-                'from_channel': 6,
-                'to_channel': new_channel,
-                'result': 'sent'
-            }
-            self.controller_actions.append(action)
-            logger.info(f"✓ Channel switch command sent: 6 → {new_channel}")
-            
-        except Exception as e:
-            logger.error(f"Failed to send channel switch command: {e}")
-    
-    def get_status(self):
-        """Return current controller status"""
-        return {
-            'timestamp': time.time(),
-            'jammer_detected': self.jammer_detected,
-            'jammer_mac': self.jammer_mac,
-            'current_channel': self.current_channel,
-            'ap_metrics': self.latest_ap_metrics,
-            'monitor_metrics': self.latest_monitor_metrics,
-            'actions_count': len(self.controller_actions),
-            'latest_actions': self.controller_actions[-5:] if self.controller_actions else []
-        }
-    
-    def get_metrics_history(self):
-        """Return stored metrics for dashboard"""
-        return list(self.metrics_history)
-    
-    def get_actions_log(self):
-        """Return all controller actions"""
-        return self.controller_actions
-    
+
+            elapsed = time.time() - start
+            self.update_count += 1
+
+            # --- Extract metrics ---
+            rssi_vals = list(self.latest_ap.get('rssi_per_client', {}).values())
+            avg_rssi = sum(rssi_vals) / len(rssi_vals) if rssi_vals else -55
+            pkt_rate = self.latest_mon.get('jammer_packet_rate_pps', 0)
+            throughput = self.latest_mon.get('local_throughput_mbps', 9.0)
+            pkt_loss = self.latest_mon.get('packet_loss_percent', 0)
+            chan = self.latest_ap.get('channel', self.current_channel)
+            num_clients = self.latest_ap.get('num_clients', 0)
+            chan_util = self.latest_ap.get('channel_utilization_percent', 0)
+            jammer_on = self.latest_mon.get('jammer_active', False)
+
+            # Establish baseline in first 5 seconds
+            if self.baseline_rssi is None and elapsed < 6:
+                self.baseline_rssi = avg_rssi
+                self.baseline_tp = throughput if throughput > 0 else 9.0
+                logger.info(f"📊 Baseline: RSSI={self.baseline_rssi:.0f} dBm, Throughput={self.baseline_tp:.1f} Mbps")
+
+            # --- Print status ---
+            print()
+            logger.info("━" * 65)
+            logger.info(f"  📊 NETWORK STATUS — Update #{self.update_count} (t={elapsed:.0f}s)")
+            logger.info("━" * 65)
+            logger.info(f"  AP:           {self.latest_ap.get('ap_ip', self.ap_ip)}")
+            logger.info(f"  Monitor:      {self.latest_mon.get('monitor_ip', self.monitor_ip)}")
+            logger.info(f"  Channel:      {chan}")
+            logger.info(f"  Clients:      {num_clients}")
+            logger.info(f"  Avg RSSI:     {avg_rssi:.0f} dBm")
+            logger.info(f"  Throughput:   {throughput:.1f} Mbps")
+            logger.info(f"  Packet Rate:  {pkt_rate} pps")
+            logger.info(f"  Packet Loss:  {pkt_loss}%")
+            logger.info(f"  Chan Util:    {chan_util}%")
+
+            if self.jammer_detected:
+                logger.info(f"  Status:       🔴 ATTACK DETECTED — ISOLATED")
+            elif jammer_on or pkt_rate > self.thresh_pkt:
+                logger.info(f"  Status:       🟡 SUSPICIOUS")
+            else:
+                logger.info(f"  Status:       🟢 CLEAN")
+            logger.info("━" * 65)
+
+            # --- Detection ---
+            if self.baseline_rssi is not None and not self.jammer_detected and elapsed > 6:
+                score = 0
+                reasons = []
+
+                if pkt_rate > self.thresh_pkt:
+                    score += 40
+                    reasons.append(f"pkt_rate={pkt_rate}pps")
+
+                rssi_drop = self.baseline_rssi - avg_rssi
+                if rssi_drop > self.thresh_rssi:
+                    score += 30
+                    reasons.append(f"rssi_drop={rssi_drop:.0f}dBm")
+
+                if self.baseline_tp > 0:
+                    tp_loss = ((self.baseline_tp - throughput) / self.baseline_tp) * 100
+                    if tp_loss > self.thresh_tp:
+                        score += 30
+                        reasons.append(f"tp_loss={tp_loss:.0f}%")
+
+                if score >= self.thresh_conf:
+                    self.jammer_detected = True
+                    suspect_mac = self.latest_mon.get('my_mac', 'unknown')
+                    print()
+                    logger.warning("🚨" * 20)
+                    logger.warning(f"  JAMMING ATTACK DETECTED!")
+                    logger.warning(f"  Confidence: {score} pts  ({' + '.join(reasons)})")
+                    logger.warning(f"  Suspect MAC: {suspect_mac}")
+                    logger.warning(f"  Source: Monitor laptop ({self.monitor_ip})")
+                    logger.warning("🚨" * 20)
+
+                    # Action 1: Blacklist MAC
+                    self._send_to_ap({
+                        'command': 'blacklist_mac',
+                        'target_mac': suspect_mac,
+                        'reason': 'jamming_detected'
+                    })
+                    logger.info(f"  ✓ Sent BLACKLIST command to AP → block {suspect_mac}")
+
+                    # Action 2: Channel switch (after 2 sec)
+                    time.sleep(2)
+                    self._send_to_ap({
+                        'command': 'switch_channel',
+                        'target_channel': self.new_channel,
+                        'reason': 'jammer_on_current_channel'
+                    })
+                    self.channel_switched = True
+                    self.current_channel = self.new_channel
+                    logger.info(f"  ✓ Sent CHANNEL SWITCH to AP → CH 6 → CH {self.new_channel}")
+                    logger.info(f"  ✓ Attacker isolated. Network recovering.\n")
+
+    def _send_to_ap(self, cmd):
+        if self.ap_addr:
+            self.sock.sendto(json.dumps(cmd).encode(), self.ap_addr)
+
     def stop(self):
-        """Stop the controller"""
         self.running = False
-        if self.server_socket:
-            self.server_socket.close()
-        logger.info("Controller stopped")
+        self.sock.close()
+        logger.info("Controller stopped.")
 
 
 def main():
     import sys
-    config_file = sys.argv[1] if len(sys.argv) > 1 else 'config.json'
-    
-    controller = ControllerServer(config_file)
-    controller.start()
-    
+    cfg = sys.argv[1] if len(sys.argv) > 1 else 'config.json'
+    ctrl = Controller(cfg)
+    ctrl.start()
     try:
         while True:
             time.sleep(1)
-            status = controller.get_status()
-            # Periodic logging
-            if status['jammer_detected']:
-                logger.info(f"Status: JAMMER DETECTED at MAC {status['jammer_mac']}")
     except KeyboardInterrupt:
         logger.info("Shutting down...")
-        controller.stop()
+        ctrl.stop()
 
 
 if __name__ == '__main__':
