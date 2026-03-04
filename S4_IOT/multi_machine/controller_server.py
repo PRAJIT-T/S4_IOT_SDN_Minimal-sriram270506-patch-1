@@ -47,10 +47,10 @@ class Controller:
         self.current_channel = 6
         self.update_count = 0
 
-        # UDP socket
+        # UDP socket — bind 0.0.0.0 so we receive on ALL interfaces
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind((self.ip, self.port))
+        self.sock.bind(('0.0.0.0', self.port))
 
         self._print_banner()
 
