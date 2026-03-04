@@ -2,119 +2,93 @@
   SDN ATTACK DETECTION — 3 LAPTOP DEMO
 ================================================================
 
-  3 laptops on same WiFi. One command each. 30 seconds.
-
-       ┌──────────────────┐
-       │  YOUR WiFi ROUTER│
-       └──┬──────┬──────┬─┘
-          │      │      │
-      LAPTOP 1  LAPTOP 2  LAPTOP 3
-      Controller AP Agent  Monitor+Attacker
-
-
-  SETUP (already done):
-    • All 3 laptops on same WiFi
-    • multi_machine/ folder on all 3
-    • config.json has your real IPs (lines 10-13):
-        controller_ip = Laptop 1's IP
-        ap_ip         = Laptop 2's IP
-        monitor_ip    = Laptop 3's IP
+  THIS laptop = Controller + Hotspot
+  Laptop 2    = AP Agent
+  Laptop 3    = Monitor + Attacker
 
 
 ================================================================
-  RUN (in this order)
+  BEFORE YOU GO OFFLINE — DO THESE NOW
 ================================================================
 
-  LAPTOP 1 — open terminal:
+  1. Copy the entire multi_machine/ folder to BOTH other
+     laptops via USB or file share. They MUST have the
+     updated code. The folder contains:
+       - controller_server.py
+       - ap_agent.py
+       - monitor_agent.py
+       - config.json
+
+
+================================================================
+  STEP 1: CREATE HOTSPOT (this laptop)
+================================================================
+
+  Run in terminal:
+    nmcli device wifi hotspot ifname wlp0s20f3 ssid SDN-Demo password 12345678
+
+  Your IP becomes: 10.42.0.1  (always)
+  Internet will cut — that's OK.
+
+
+================================================================
+  STEP 2: CONNECT OTHER LAPTOPS
+================================================================
+
+  On Laptop 2 and Laptop 3:
+    Connect WiFi to "SDN-Demo", password: 12345678
+
+  Then on EACH laptop run:
+    hostname -I
+
+  Write down:
+    Laptop 2 IP: 10.42.0.___
+    Laptop 3 IP: 10.42.0.___
+
+
+================================================================
+  STEP 3: UPDATE config.json ON ALL 3 LAPTOPS
+================================================================
+
+  Open multi_machine/config.json on EACH laptop.
+  Edit lines 10-12:
+
+    "controller_ip": "10.42.0.1",
+    "ap_ip": "<Laptop 2's IP from step 2>",
+    "monitor_ip": "<Laptop 3's IP from step 2>",
+
+  Example (if Laptop 2 = 10.42.0.186, Laptop 3 = 10.42.0.54):
+    "controller_ip": "10.42.0.1",
+    "ap_ip": "10.42.0.186",
+    "monitor_ip": "10.42.0.54",
+
+  ALL 3 LAPTOPS MUST HAVE THE SAME config.json!
+
+
+================================================================
+  STEP 4: RUN (in this order)
+================================================================
+
+  THIS LAPTOP (Controller) — terminal:
     cd multi_machine
     python3 controller_server.py config.json
 
-  LAPTOP 2 — open terminal (after 3 sec):
+  LAPTOP 2 (AP Agent) — wait 3 sec, then:
     cd multi_machine
     python3 ap_agent.py config.json
 
-  LAPTOP 3 — open terminal (after 3 sec):
+  LAPTOP 3 (Monitor+Attacker) — wait 3 sec, then:
     cd multi_machine
     python3 monitor_agent.py config.json
 
-
-================================================================
-  OUTPUT YOU WILL SEE
-================================================================
-
-  LAPTOP 1 (Controller):
-  ─────────────────────
-    ✓ AP Agent connected from 10.135.40.17
-    ✓ Monitor Agent connected from 10.135.40.120
-    📊 Baseline: RSSI=-52 dBm, Throughput=9.0 Mbps
-
-    [Every 2 seconds — clean status table:]
-      AP: 10.135.40.17   Monitor: 10.135.40.120
-      Channel: 6   Clients: 2   RSSI: -52 dBm
-      Throughput: 9.2 Mbps   PktRate: 0 pps
-      Status: 🟢 CLEAN
-
-    [At ~12 seconds — attack detected:]
-      🚨 JAMMING ATTACK DETECTED!
-      Confidence: 100 pts
-      Suspect MAC: aa:bb:cc:dd:ee:ff
-      Source: Monitor laptop (10.135.40.120)
-      ✓ Sent BLACKLIST command to AP
-      ✓ Sent CHANNEL SWITCH → CH 6 → CH 11
-
-    [After attack:]
-      Throughput: 9.1 Mbps   PktRate: 0 pps
-      Status: 🔴 ATTACK DETECTED — ISOLATED
-
-
-  LAPTOP 2 (AP Agent):
-  ─────────────────────
-    AP IP: 10.135.40.17
-    SIMULATED NODES:
-      Node-1: MAC=aa:11:22:33:44:01  RSSI=-52 dBm
-      Node-2: MAC=aa:11:22:33:44:02  RSSI=-56 dBm
-
-    [Every 2 seconds:]
-      CH=6  Nodes=2  RSSI=-53dBm  ChanUtil=25%  [✅ Normal]
-
-    [When attack detected by controller:]
-      🔒 CONTROLLER COMMAND: BLACKLIST MAC
-        Blocked MAC: aa:bb:cc:dd:ee:ff
-      📡 CONTROLLER COMMAND: CHANNEL SWITCH
-        Channel: 6 → 11
-
-
-  LAPTOP 3 (Monitor + Attacker):
-  ──────────────────────────────
-    Monitor IP: 10.135.40.120
-    MAC: aa:bb:cc:dd:ee:ff
-    AP (ping target): 10.135.40.17
-
-    [0-10 sec — baseline:]
-      🟢 Clean | Ping 10.135.40.17: 0% loss, 4.2ms
-      Throughput: 9.1 Mbps
-
-    [10 sec — attack starts automatically:]
-      🚨 ACTIVATING JAMMING ATTACK!
-      Source: 10.135.40.120   Target: 10.135.40.17
-      Rate: 8000 packets/sec
-
-    [10-20 sec — during attack:]
-      🔴 ATTACK | Ping 10.135.40.17: 100% loss — Dest Unreachable
-      Throughput: 0.3 Mbps | PktRate: 8000 pps
-
-    [20 sec — attack stops automatically:]
-      ✓ JAMMER DEACTIVATED — Network recovering
-
-    [20+ sec — recovery:]
-      🟢 Clean | Ping 10.135.40.17: 0% loss, 5.1ms
-      Throughput: 9.3 Mbps
+  Done. Watch all 3 terminals. Full demo runs in 30 sec.
 
 
 ================================================================
   TROUBLESHOOTING
 ================================================================
-  "Address in use"  → pkill -f python3 , wait 5 sec, retry
-  No output         → Controller must start FIRST
-  Can't connect     → Check IPs in config.json, same WiFi?
+  "Address in use"   → pkill -f python3, wait 5 sec, retry
+  No connection      → Check config.json IPs match hostname -I
+  Still no output    → On each laptop run: ping 10.42.0.1
+                       If fails, reconnect to SDN-Demo WiFi
 ================================================================

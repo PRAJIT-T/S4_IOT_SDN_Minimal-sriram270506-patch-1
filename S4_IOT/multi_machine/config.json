@@ -7,10 +7,10 @@
   },
 
   "network": {
-    "controller_ip": "10.135.40.9",
+    "controller_ip": "10.42.0.1",
     "controller_port": 9000,
-    "ap_ip": "10.135.40.17",
-    "monitor_ip": "10.135.40.120",
+    "ap_ip": "CHANGE_ME",
+    "monitor_ip": "CHANGE_ME",
 
     "uplink": {
       "interface": "wlo1",
