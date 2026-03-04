@@ -1,0 +1,537 @@
+================================================================================
+  HOW TO RUN THE SDN IoT ATTACK DETECTION SYSTEM ON 3 REAL LAPTOPS
+  (Using the updated multi_machine/ code)
+================================================================================
+
+Date: March 4, 2026
+Code folder: multi_machine/
+Files used:
+  - controller_server.py    (Laptop 1 - Controller)
+  - ap_agent.py             (Laptop 2 - AP Agent, simulates 2 nodes)
+  - monitor_agent.py        (Laptop 3 - Monitor + Attacker)
+  - config.json             (shared config - copy to all laptops)
+  - dashboard.py            (optional - runs on Laptop 1 for web UI)
+  - setup.sh                (one-time setup helper)
+
+
+================================================================================
+  WHAT YOU NEED
+================================================================================
+
+  Hardware:
+    • 1 WiFi Router (your home/college router - any router works)
+    • 3 Laptops with WiFi + Python 3.7+
+    • All 3 laptops connected to the SAME WiFi router
+
+  Roles:
+    ┌──────────────────────────────────────────────────────────────────┐
+    │  LAPTOP 1 - CONTROLLER         (the brain)                     │
+    │  LAPTOP 2 - AP AGENT           (simulates 2 WiFi nodes)        │
+    │  LAPTOP 3 - MONITOR + ATTACKER (monitors + launches attack)    │
+    └──────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+  NETWORK DIAGRAM
+================================================================================
+
+             ┌──────────────────────┐
+             │    YOUR WiFi ROUTER  │
+             │   (192.168.x.1)      │
+             └────┬──────┬──────┬───┘
+                  │      │      │
+            WiFi  │      │      │  WiFi
+                  │      │      │
+     ┌────────────┘      │      └────────────┐
+     │                   │                   │
+     ▼                   ▼                   ▼
+┌─────────┐       ┌─────────┐         ┌─────────────┐
+│ LAPTOP 1│       │ LAPTOP 2│         │  LAPTOP 3   │
+│Controller│       │AP Agent │         │Monitor+Attack│
+│192.168.x│       │192.168.x│         │ 192.168.x   │
+│Port 9000│       │Port 9001│         │             │
+└─────────┘       └─────────┘         └─────────────┘
+     ▲                 │                    │
+     │    metrics      │                    │  metrics
+     │    (UDP)        │                    │  (UDP)
+     └─────────────────┴────────────────────┘
+
+  Communication:
+    • Laptop 2 (AP Agent) ──sends metrics──► Laptop 1 (Controller) on port 9000
+    • Laptop 3 (Monitor)  ──sends metrics──► Laptop 1 (Controller) on port 9000
+    • Laptop 1 (Controller)──sends commands──► Laptop 2 (AP Agent) on port 9001
+    • Laptop 3 (Monitor)  ──activates jammer internally (UDP flood)──► broadcast
+
+
+================================================================================
+  STEP 0: FIND YOUR IP ADDRESSES (DO THIS ON ALL 3 LAPTOPS)
+================================================================================
+
+  On each laptop, open a terminal and run:
+
+    Linux:    ip addr show | grep "inet " | grep -v 127.0.0.1
+    Mac:      ifconfig | grep "inet " | grep -v 127.0.0.1
+
+  Write down the IPs. Example:
+    Laptop 1 (Controller):    192.168.1.100
+    Laptop 2 (AP Agent):      192.168.1.101
+    Laptop 3 (Monitor):       192.168.1.102
+
+  *** Your actual IPs will be different - use YOUR real IPs everywhere below ***
+
+  Test connectivity between all laptops:
+    From Laptop 2:  ping 192.168.1.100    (should get reply from Controller)
+    From Laptop 3:  ping 192.168.1.100    (should get reply from Controller)
+    From Laptop 1:  ping 192.168.1.101    (should get reply from AP)
+
+  If ping fails → check WiFi connection / firewall.
+
+
+================================================================================
+  STEP 1: COPY FILES TO EACH LAPTOP
+================================================================================
+
+  Copy the entire multi_machine/ folder to ALL 3 laptops.
+
+  Method 1 - USB drive:
+    Copy multi_machine/ folder to USB → copy to each laptop
+
+  Method 2 - Git:
+    On each laptop:
+      git clone <your-repo-url>
+      cd S4_IOT/multi_machine/
+
+  Method 3 - SCP (from one laptop to others):
+    scp -r multi_machine/ user@192.168.1.101:~/
+    scp -r multi_machine/ user@192.168.1.102:~/
+
+  After copying, each laptop should have:
+    multi_machine/
+      ├── config.json
+      ├── controller_server.py
+      ├── ap_agent.py
+      ├── monitor_agent.py
+      ├── dashboard.py
+      ├── orchestrator.py
+      └── setup.sh
+
+
+================================================================================
+  STEP 2: EDIT config.json ON ALL 3 LAPTOPS
+================================================================================
+
+  Open config.json and update the IP addresses to match YOUR real IPs.
+
+  The IMPORTANT fields to change:
+
+  In the "network" section, find and update these fields:
+
+    "controller_ip": "192.168.1.100"    ← PUT YOUR LAPTOP 1 REAL IP
+    "controller_port": 9000
+    "ap_ip": "192.168.1.101"            ← PUT YOUR LAPTOP 2 REAL IP
+    "monitor_ip": "192.168.1.102"       ← PUT YOUR LAPTOP 3 REAL IP
+
+  NOTE: The current config.json was written for single-laptop mode
+        (192.168.88.x). For 3-laptop deployment you MUST change these
+        IPs to your real router-assigned IPs (192.168.x.x).
+
+  *** HOW TO EDIT (detailed) ***
+
+  The config.json has nested sections. Find and modify:
+
+    "network": {
+      ...
+      "controller": {
+        "ip_address": "192.168.1.100",     ← CHANGE THIS to Laptop 1 IP
+        "port": 9000,
+        ...
+      },
+      "monitor": {
+        "ip_address": "192.168.1.102",     ← CHANGE THIS to Laptop 3 IP
+        "port": 9001,
+        ...
+      }
+    }
+
+  Also update the top-level network IPs if the code reads from there:
+    "controller_ip": "192.168.1.100"
+    "ap_ip": "192.168.1.101"
+    "monitor_ip": "192.168.1.102"
+
+  Save the file. Make sure ALL 3 laptops have the SAME config.json with
+  the SAME IPs.
+
+
+================================================================================
+  STEP 3: ONE-TIME SETUP (run on each laptop)
+================================================================================
+
+  On each laptop, open a terminal in the multi_machine/ folder:
+
+    cd multi_machine/
+    bash setup.sh
+
+  When it asks "Which machine are you setting up?"
+
+    Laptop 1 → type: controller    (installs flask, numpy, matplotlib)
+    Laptop 2 → type: ap            (installs hostapd, dnsmasq, iw)
+    Laptop 3 → type: monitor       (installs iperf3)
+
+  If setup.sh gives errors, install manually:
+
+    Laptop 1:  pip3 install flask numpy matplotlib
+    Laptop 2:  sudo apt-get install hostapd dnsmasq wireless-tools
+    Laptop 3:  sudo apt-get install iperf3
+
+  NOTE: If you don't have hostapd on Laptop 2, the AP agent will still
+  run in MOCK MODE (simulates 2 nodes without real WiFi broadcasting).
+  This is perfectly fine for demonstration.
+
+
+================================================================================
+  STEP 4: OPEN FIREWALL PORTS (if firewall is active)
+================================================================================
+
+  On ALL 3 laptops, allow UDP ports 9000-9003:
+
+    sudo ufw allow 9000:9003/udp
+
+  Or disable firewall temporarily for demo:
+
+    sudo ufw disable
+
+  Check firewall status:
+
+    sudo ufw status
+
+
+================================================================================
+  STEP 5: START THE SYSTEM (ORDER MATTERS!)
+================================================================================
+
+  *** START IN THIS EXACT ORDER. WAIT BETWEEN EACH STEP. ***
+
+  ─────────────────────────────────────────────────────────────────────
+  LAPTOP 1 (Controller) - START FIRST
+  ─────────────────────────────────────────────────────────────────────
+
+    cd multi_machine/
+    python3 controller_server.py config.json
+
+  Wait for this output:
+    [xx:xx:xx] [CONTROLLER] Controller initialized
+    [xx:xx:xx] [CONTROLLER] Controller listening on 192.168.1.100:9000
+    [xx:xx:xx] [CONTROLLER] Controller threads started
+
+  ✓ Controller is ready. Move to Laptop 2.
+
+  ─────────────────────────────────────────────────────────────────────
+  LAPTOP 2 (AP Agent) - START SECOND (wait 3 seconds after controller)
+  ─────────────────────────────────────────────────────────────────────
+
+    cd multi_machine/
+    python3 ap_agent.py config.json
+
+  Wait for this output:
+    [xx:xx:xx] [AP_AGENT] AP Agent initialized on 192.168.1.101:9001
+    [xx:xx:xx] [AP_AGENT] AP Agent threads started
+
+  What this does:
+    • Simulates 2 WiFi nodes (clients) with realistic metrics
+    • Sends metrics to controller every 2 seconds via UDP
+    • Reports: RSSI per client, channel utilization, connected clients
+    • If hostapd is installed → broadcasts real "SDN-TestNet" WiFi
+    • If hostapd NOT installed → runs in mock mode (simulates 2 nodes)
+
+  The 2 simulated nodes:
+    Node 1: MAC 00:11:22:33:44:55, RSSI -55 dBm (good signal)
+    Node 2: MAC 00:11:22:33:44:66, RSSI -58 dBm (good signal)
+
+  ✓ AP Agent is running. Move to Laptop 3.
+
+  ─────────────────────────────────────────────────────────────────────
+  LAPTOP 3 (Monitor + Attacker) - START THIRD (wait 3 sec after AP)
+  ─────────────────────────────────────────────────────────────────────
+
+    cd multi_machine/
+    python3 monitor_agent.py config.json
+
+  Wait for this output:
+    [xx:xx:xx] [MONITOR] Monitor Agent initialized (MAC: aa:bb:cc:dd:ee:ff)
+    [xx:xx:xx] [MONITOR] Monitor Agent started
+
+  What this does:
+    • Sends monitoring metrics to controller every 1 second
+    • Measures ping latency, throughput, channel scans
+    • After 10 seconds → AUTOMATICALLY ACTIVATES JAMMER (UDP flood)
+    • After 20 seconds → AUTOMATICALLY DEACTIVATES JAMMER
+    • The jammer sends 8000 packets/sec broadcast UDP flood
+
+  ✓ All 3 components are now running!
+
+
+================================================================================
+  STEP 6: WATCH THE DEMO UNFOLD
+================================================================================
+
+  Go back to LAPTOP 1 (Controller) and watch the terminal output.
+
+  ── Phase 1: BASELINE (first ~10 seconds) ──────────────────────────
+
+  Controller receives metrics from AP and Monitor.
+  You'll see periodic logs like:
+
+    [CONTROLLER] Baseline established: RSSI=-55dBm, Throughput=9.00Mbps
+    [CONTROLLER] Status: monitoring...
+
+  Metrics during baseline:
+    • Throughput:    ~9.0 Mbps (healthy)
+    • RSSI:         -55 dBm (strong signal)
+    • Packet Rate:   0 pps (no jammer)
+    • Latency:      ~15 ms (normal)
+
+  ── Phase 2: ATTACK (at ~10 seconds, automatic) ───────────────────
+
+  Laptop 3's monitor_agent.py automatically activates the jammer at
+  the 10-second mark. You'll see on Laptop 3:
+
+    [MONITOR] 🚨 ACTIVATING JAMMER 🚨
+    [MONITOR] Jammer thread started: 8000pps, 1500B packets
+
+  On Laptop 1 (Controller), metrics degrade:
+    • Throughput:    drops to 0 Mbps
+    • Packet Rate:   spikes to 8000 pps
+    • RSSI:         degrades
+
+  Controller detects the attack:
+
+    [CONTROLLER] ⚠️  JAMMER DETECTED! Confidence: 85.5% (high_pkt_rate(8000pps) + rssi_drop + throughput_loss)
+    [CONTROLLER] ✓ MAC blacklist command sent: aa:bb:cc:dd:ee:ff
+
+  2 seconds later, controller switches channel:
+
+    [CONTROLLER] Initiating channel switch...
+    [CONTROLLER] ✓ Channel switch command sent: 6 → 11
+
+  On Laptop 2 (AP Agent), you'll see:
+
+    [AP_AGENT] Received command: blacklist_mac
+    [AP_AGENT] [MOCK] MAC blacklisted: aa:bb:cc:dd:ee:ff
+    [AP_AGENT] Received command: switch_channel
+    [AP_AGENT] [MOCK] Channel switched to 11
+
+  ── Phase 3: RECOVERY (at ~20 seconds) ─────────────────────────────
+
+  Laptop 3's monitor_agent.py automatically deactivates the jammer.
+
+    [MONITOR] Deactivating jammer...
+    [MONITOR] Jammer stopped
+
+  Controller sees metrics recover:
+    • Throughput returns to ~9.0 Mbps
+    • Packet rate drops to 0
+    • Network is clean again
+
+  ✓ DEMO COMPLETE! Attack detected and mitigated.
+
+
+================================================================================
+  STEP 7: OPTIONAL - WEB DASHBOARD (on Laptop 1)
+================================================================================
+
+  Open a SECOND terminal on Laptop 1:
+
+    cd multi_machine/
+    python3 dashboard.py config.json
+
+  Then open browser:
+    http://127.0.0.1:8080
+
+  The dashboard shows:
+    • Live throughput graph
+    • RSSI signal strength
+    • Channel status (6 → 11 switch)
+    • Controller event log (detection + blacklist + channel switch)
+    • Jammer detection alerts
+
+
+================================================================================
+  THE DETECTION ALGORITHM (what the controller actually does)
+================================================================================
+
+  The controller uses a multi-factor confidence scoring system:
+
+    score = 0
+
+    1. Packet Rate > 5000 pps?         → score += 40 points
+    2. RSSI drop > 15 dBm from baseline? → score += 30 points
+    3. Throughput loss > 50%?            → score += 30 points
+
+    If score >= 60  →  JAMMER DETECTED
+
+  Response actions (automatic):
+    Action 1: MAC BLACKLIST (immediate)
+      - Sends blacklist command to AP agent
+      - AP blocks jammer's MAC address via hostapd_cli
+
+    Action 2: CHANNEL SWITCH (2 seconds later)
+      - Switches AP from Channel 6 → Channel 11
+      - Moves all clients away from jammed channel
+
+
+================================================================================
+  WHAT EACH FILE DOES (the updated code)
+================================================================================
+
+  controller_server.py (328 lines)
+  ─────────────────────────────────
+    • ControllerServer class: UDP server on port 9000
+    • JammerDetectionEngine class: multi-factor scoring algorithm
+    • _listener_loop(): receives JSON metrics via UDP from AP + Monitor
+    • _detection_loop(): checks for jammer every 2 seconds
+    • _on_jammer_detected(): triggers MAC blacklist
+    • _blacklist_mac(): sends UDP command to AP agent
+    • _switch_channel(): sends channel switch command to AP agent
+    • get_status(): returns current state for dashboard
+
+  ap_agent.py (281 lines)
+  ─────────────────────────
+    • APAgent class: simulates WiFi Access Point
+    • Simulates 2 virtual WiFi nodes (clients) with mock data
+    • _reporter_loop(): sends AP metrics to controller every 2 sec
+    • _command_listener(): listens for commands from controller
+    • _execute_channel_switch(): runs hostapd_cli or mock
+    • _execute_mac_blacklist(): runs hostapd_cli deny_acl or mock
+    • _get_connected_clients(): queries hostapd or returns mock 2 nodes
+
+  monitor_agent.py (277 lines)
+  ─────────────────────────────
+    • MonitorAgent class: network monitoring + pseudo-jammer
+    • _reporter_loop(): sends metrics to controller every 1 sec
+    • _measure_ping_latency(): pings 8.8.8.8 for latency
+    • _measure_local_throughput(): reports throughput (0 when jamming)
+    • activate_jammer(): starts UDP flood (8000 pps, 1500B packets)
+    • deactivate_jammer(): stops the UDP flood
+    • _jammer_loop(): sends UDP broadcast packets at target rate
+    • Auto-schedule: jammer ON at 10s, OFF at 20s
+
+  config.json (247 lines)
+  ─────────────────────────
+    • Network IPs and ports for all components
+    • WiFi AP settings (SSID, channel, etc.)
+    • Jammer settings (packet rate, size)
+    • Detection thresholds (packet rate, RSSI, throughput)
+    • Experiment phase timings
+    • Logging configuration
+
+  dashboard.py (421 lines)
+  ─────────────────────────
+    • Flask web server on port 8080
+    • Real-time charts (Chart.js) for throughput, RSSI
+    • API endpoints: /api/status, /api/metrics, /api/actions
+    • Auto-refreshing every 2 seconds
+
+  orchestrator.py (312 lines)
+  ────────────────────────────
+    • Automates the entire experiment
+    • Starts all components as subprocesses
+    • Runs through all phases automatically
+    • Saves results to sdn_testbed_metrics.json
+
+  setup.sh (130 lines)
+  ─────────────────────
+    • One-time setup helper
+    • Installs dependencies per role (controller/ap/monitor)
+
+
+================================================================================
+  QUICK TROUBLESHOOTING
+================================================================================
+
+  Problem: "Connection refused" or no metrics on Controller
+  Fix:
+    • Make sure Controller started FIRST
+    • Check IPs in config.json match actual laptop IPs
+    • Open firewall: sudo ufw allow 9000:9003/udp
+    • Test: ping <controller-ip> from other laptops
+
+  Problem: AP Agent shows "Failed to get connected clients"
+  Fix:
+    • This is NORMAL if hostapd isn't installed
+    • It falls back to mock mode (simulates 2 fake nodes)
+    • Mock mode works perfectly for demo
+
+  Problem: Controller doesn't detect jammer
+  Fix:
+    • Wait at least 15 seconds (baseline + attack needs time)
+    • Check monitor_agent.py is running on Laptop 3
+    • The jammer activates automatically at 10 seconds
+    • Check config.json detection thresholds
+
+  Problem: "Address already in use"
+  Fix:
+    • Kill old processes: pkill -f controller_server.py
+    • Kill all: pkill -f "python3.*agent"
+    • Wait 30 seconds, then retry
+
+  Problem: Laptops can't ping each other
+  Fix:
+    • Make sure ALL laptops are on the SAME WiFi network
+    • Check router's client isolation setting is OFF
+    • Disable firewall: sudo ufw disable
+    • Try with ethernet cable if WiFi fails
+
+
+================================================================================
+  ALTERNATIVE: RUN ORCHESTRATOR (AUTOMATED MODE)
+================================================================================
+
+  Instead of starting each component manually, you can use the
+  orchestrator on ONE laptop (if all are accessible):
+
+    cd multi_machine/
+    python3 orchestrator.py config.json
+
+  This automatically:
+    1. Starts controller, AP agent, monitor agent
+    2. Runs 10s baseline
+    3. Activates jammer for 10s
+    4. Watches controller detect + respond
+    5. Measures 18s recovery
+    6. Saves results to sdn_testbed_metrics.json
+
+  NOTE: The orchestrator launches subprocesses, so it works best
+  when all code is on the SAME laptop. For 3-laptop setup,
+  use the manual method (Step 5 above).
+
+
+================================================================================
+  SUMMARY - CHEAT SHEET
+================================================================================
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                                                                 │
+  │  1. Connect all 3 laptops to same WiFi router                  │
+  │  2. Find IPs: ip addr show | grep inet                        │
+  │  3. Edit config.json with real IPs on all 3 laptops            │
+  │  4. Open firewall: sudo ufw allow 9000:9003/udp               │
+  │                                                                 │
+  │  LAPTOP 1:  python3 controller_server.py config.json           │
+  │             (wait 3 sec)                                        │
+  │  LAPTOP 2:  python3 ap_agent.py config.json                   │
+  │             (wait 3 sec)                                        │
+  │  LAPTOP 3:  python3 monitor_agent.py config.json               │
+  │                                                                 │
+  │  WATCH Laptop 1 terminal:                                      │
+  │    0-10s  → baseline metrics (clean)                           │
+  │    10-20s → jammer active → ATTACK DETECTED → ISOLATED         │
+  │    20s+   → recovery (clean again)                             │
+  │                                                                 │
+  │  OPTIONAL: python3 dashboard.py config.json on Laptop 1        │
+  │            Open http://127.0.0.1:8080 for live graphs          │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+
+================================================================================
+  END OF GUIDE
+================================================================================
