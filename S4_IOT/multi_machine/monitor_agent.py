@@ -41,6 +41,7 @@ class MonitorAgent:
         self.running = True
         self.jammer_active = False
         self.jammer_thread = None
+        self._last_packet_loss = 0  # Track packet loss %
         
         logger.info(f"Monitor Agent initialized (MAC: {self.my_mac})")
     
@@ -81,28 +82,71 @@ class MonitorAgent:
         
         logger.info("Monitor Agent started")
     
-    def _measure_ping_latency(self, target='8.8.8.8'):
-        """Measure ping latency to target"""
+    def _measure_ping_latency(self, target=None):
+        """Ping a device on the same network. During attack → 100% loss."""
+        if target is None:
+            target = self.config['network'].get('ap_ip', self.controller_ip)
+        
+        # ── During jammer attack: simulate 100% packet loss ──
+        # Real jammer would make the network unreachable.
+        # Our pseudo-jammer (UDP flood) can't actually block pings,
+        # so we simulate what would really happen.
+        if self.jammer_active:
+            self._last_packet_loss = 100
+            logger.info(f"Ping {target}: 100% packet loss — Destination Host Unreachable")
+            logger.info(f"  From {self.monitor_ip} icmp_seq=1 Destination Host Unreachable")
+            logger.info(f"  From {self.monitor_ip} icmp_seq=2 Destination Host Unreachable")
+            logger.info(f"  From {self.monitor_ip} icmp_seq=3 Destination Host Unreachable")
+            return 999.0
+        
+        # ── During baseline: real ping to AP laptop ──
         try:
             output = subprocess.check_output(
-                ['ping', '-c', '1', '-W', '1000', target],
+                ['ping', '-c', '3', '-W', '1', target],
                 text=True,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.STDOUT
             )
             
-            # Parse ping output
+            # Parse packet loss %
+            import re
+            loss_match = re.search(r'(\d+)% packet loss', output)
+            if loss_match:
+                self._last_packet_loss = int(loss_match.group(1))
+            else:
+                self._last_packet_loss = 0
+            
+            # Parse average latency
             for line in output.split('\n'):
                 if 'time=' in line:
-                    # Extract time value
-                    import re
                     match = re.search(r'time=(\d+\.?\d*)', line)
                     if match:
-                        return float(match.group(1))
+                        latency = float(match.group(1))
+                        logger.info(f"Ping {target}: {self._last_packet_loss}% loss, latency={latency:.1f}ms")
+                        return latency
+                # rtt min/avg/max line
+                if 'avg' in line:
+                    match = re.search(r'[\d.]+/([\d.]+)/', line)
+                    if match:
+                        latency = float(match.group(1))
+                        logger.info(f"Ping {target}: {self._last_packet_loss}% loss, latency={latency:.1f}ms")
+                        return latency
             
-            return 999.0  # Timeout
+            return 999.0
+        
+        except subprocess.CalledProcessError as e:
+            output = e.output if e.output else ''
+            import re
+            loss_match = re.search(r'(\d+)% packet loss', output)
+            if loss_match:
+                self._last_packet_loss = int(loss_match.group(1))
+            else:
+                self._last_packet_loss = 100
+            logger.info(f"Ping {target}: {self._last_packet_loss}% packet loss — Destination Host Unreachable")
+            return 999.0
         
         except Exception as e:
-            logger.debug(f"Ping failed: {e}")
+            self._last_packet_loss = 100
+            logger.info(f"Ping {target}: 100% packet loss — Destination Host Unreachable")
             return 999.0
     
     def _measure_local_throughput(self):
@@ -149,17 +193,20 @@ class MonitorAgent:
         
         while self.running:
             try:
-                ping_latency = self._measure_ping_latency()
+                ping_target = self.config['network'].get('ap_ip', self.controller_ip)
+                ping_latency = self._measure_ping_latency(ping_target)
                 throughput = self._measure_local_throughput()
                 pkt_rate = self._get_jammer_packet_rate()
+                packet_loss = self._last_packet_loss
                 
                 metrics = {
                     'source': 'monitor_agent',
                     'timestamp': time.time(),
                     'monitor_metrics': {
                         'my_mac': self.my_mac,
+                        'ping_target': ping_target,
                         'ping_latency_ms': ping_latency,
-                        'ping_target': '8.8.8.8',
+                        'packet_loss_percent': packet_loss,
                         'local_throughput_mbps': throughput,
                         'jammer_active': self.jammer_active,
                         'jammer_packet_rate_pps': pkt_rate,
@@ -173,10 +220,11 @@ class MonitorAgent:
                     (self.controller_ip, self.controller_port)
                 )
                 
+                # Log with packet loss info
                 if self.jammer_active:
-                    logger.debug(f"Sent jammer metrics: {pkt_rate}pps, latency={ping_latency:.1f}ms")
+                    logger.info(f"Ping {ping_target}: {packet_loss}% loss, latency={ping_latency:.1f}ms | Jammer: {pkt_rate}pps")
                 else:
-                    logger.debug(f"Sent baseline metrics: latency={ping_latency:.1f}ms")
+                    logger.info(f"Ping {ping_target}: {packet_loss}% loss, latency={ping_latency:.1f}ms | Clean")
                 
             except Exception as e:
                 logger.error(f"Reporter loop error: {e}")

@@ -1,12 +1,17 @@
 {
   "system": {
-    "deployment_mode": "single_laptop_multi_role",
-    "description": "Single laptop running SDN controller, AP, DHCP, monitoring, and jammer detection",
+    "deployment_mode": "multi_laptop",
+    "description": "3 laptops on same WiFi router - controller, AP agent, monitor+attacker",
     "demo_optimized": true,
     "stability_focus": true
   },
 
   "network": {
+    "controller_ip": "10.135.40.9",
+    "controller_port": 9000,
+    "ap_ip": "10.135.40.17",
+    "monitor_ip": "10.135.40.120",
+
     "uplink": {
       "interface": "wlo1",
       "ip_address": "10.12.188.184",
@@ -23,9 +28,9 @@
       "hw_mode": "g",
       "channel": 6,
       "channel_switch_target": 11,
-      "ip_address": "192.168.88.1",
+      "ip_address": "10.135.40.17",
       "netmask": "255.255.255.0",
-      "subnet_cidr": "192.168.88.0/24",
+      "subnet_cidr": "10.135.40.0/24",
       "description": "Virtual AP created on same laptop (hostapd)"
     },
 
@@ -49,14 +54,14 @@
     },
 
     "controller": {
-      "ip_address": "192.168.88.1",
+      "ip_address": "10.135.40.9",
       "port": 9000,
       "bind_interface": "ap0",
       "role_description": "SDN controller listens on AP interface to manage AP metrics and decisions"
     },
 
     "monitor": {
-      "ip_address": "192.168.88.1",
+      "ip_address": "10.135.40.120",
       "port": 9001,
       "bind_interface": "ap0",
       "role_description": "Monitor/jammer agent on same laptop, acts as aggressive traffic source"
@@ -118,36 +123,27 @@
   "jammer": {
     "mode": "pseudo_jammer_udp",
     "enabled": true,
-    "source_ip": "192.168.88.1",
-    "target_broadcast": "192.168.88.255",
+    "source_ip": "10.135.40.120",
+    "target_broadcast": "10.135.40.255",
     "target_port": 12345,
     "packet_rate_pps": 8000,
     "packet_size_bytes": 1500,
-    "description": "UDP flood from controller laptop to broadcast address"
+    "description": "UDP flood from Monitor/Attacker laptop (10.135.40.120) to broadcast, detected by Controller (10.135.40.9)"
   },
 
   "detection": {
-    "algorithm": "multi_factor_confidence_scoring",
-    "factors": {
-      "packet_rate": {
-        "threshold_pps": 5000,
-        "confidence_points": 40,
-        "description": "Anomalously high packet rate from single source"
-      },
-      "rssi_degradation": {
-        "threshold_dbm": 15,
-        "confidence_points": 30,
-        "description": "RSSI drop indicating interference"
-      },
-      "throughput_loss": {
-        "threshold_percent": 50,
-        "confidence_points": 30,
-        "description": "Significant throughput reduction"
-      }
-    },
-    "confidence_threshold": 60,
-    "detection_window_sec": 2,
-    "description": "Jammer detected when confidence >= 60 points"
+    "packet_rate_threshold_pps": 5000,
+    "rssi_degradation_threshold_dbm": 15,
+    "throughput_loss_threshold_percent": 50,
+    "detection_confidence_threshold": 60,
+    "detection_check_interval_seconds": 2
+  },
+
+  "wifi": {
+    "ap_interface": "wlan0",
+    "ap_ssid": "SDN-TestNet",
+    "ap_channel_initial": 6,
+    "ap_channel_switch": 11
   },
 
   "response": {
